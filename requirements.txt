@@ -1,0 +1,23 @@
+# ─── Web Framework & Server ──────────────────────────────────────────────────
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# ─── Real-Time Communication ──────────────────────────────────────────────────
+python-socketio==5.11.4
+python-multipart==0.0.12        # Required for FastAPI file uploads
+
+# ─── Database & ORM ───────────────────────────────────────────────────────────
+prisma==0.15.0                  # Prisma Python client (wraps Prisma CLI)
+asyncpg==0.30.0                 # Async PostgreSQL driver
+
+# ─── Configuration & Utilities ────────────────────────────────────────────────
+pydantic-settings==2.6.1        # Typed settings management via .env
+python-dotenv==1.0.1
+
+# ─── AI / ML (stubbed for future phases) ─────────────────────────────────────
+# ultralytics       # YOLOv8  – install when Phase 1 begins
+# openai-whisper    # Audio transcription – Phase 2
+# faiss-cpu         # Vector store – Phase 3
+# chromadb          # Alternative vector store – Phase 3
+# langchain         # RAG orchestration – Phase 3 & 4
+# sentence-transformers  # Embedding model – Phase 3

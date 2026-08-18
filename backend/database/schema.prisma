@@ -1,0 +1,168 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider             = "prisma-client-py"   // Python client via prisma-client-py
+  recursive_type_depth = 5
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// USERS & AUTHENTICATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  displayName  String   @map("display_name")
+  role         UserRole @default(INVESTIGATOR)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  cases        Case[]
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  INVESTIGATOR
+  REVIEWER
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CASES
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Case {
+  id          String     @id @default(uuid())
+  caseNumber  String     @unique @map("case_number")
+  title       String
+  description String?
+  status      CaseStatus @default(OPEN)
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  // Relations
+  createdBy   User       @relation(fields: [createdById], references: [id])
+  createdById String     @map("created_by_id")
+  evidence    Evidence[]
+  auditLogs   AuditLog[]
+
+  @@map("cases")
+}
+
+enum CaseStatus {
+  OPEN
+  UNDER_REVIEW
+  CLOSED
+  ARCHIVED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EVIDENCE
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Evidence {
+  id            String         @id @default(uuid())
+  fileName      String         @map("file_name")
+  fileType      EvidenceType
+  filePath      String         @map("file_path")   // Local storage path
+  fileSize      Int            @map("file_size")   // Bytes
+  mimeType      String         @map("mime_type")
+  status        ProcessStatus  @default(PENDING)
+  uploadedAt    DateTime       @default(now()) @map("uploaded_at")
+  processedAt   DateTime?      @map("processed_at")
+
+  // Relations
+  case          Case           @relation(fields: [caseId], references: [id])
+  caseId        String         @map("case_id")
+  detections    Detection[]
+  textChunks    TextChunk[]
+
+  @@map("evidence")
+}
+
+enum EvidenceType {
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  OTHER
+}
+
+enum ProcessStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI DETECTIONS  (Phase 1 — YOLOv8 + Grad-CAM outputs)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Detection {
+  id             String   @id @default(uuid())
+  label          String                          // e.g. "handgun", "vehicle"
+  confidence     Float
+  boundingBox    Json     @map("bounding_box")   // {x, y, w, h} normalised 0-1
+  frameTimestamp Float?   @map("frame_timestamp") // seconds into video (null for images)
+  gradCamPath    String?  @map("grad_cam_path")  // relative path to saved heatmap PNG
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  // Relations
+  evidence       Evidence @relation(fields: [evidenceId], references: [id])
+  evidenceId     String   @map("evidence_id")
+
+  @@map("detections")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEXT CHUNKS  (Phase 2 & 3 — OCR / Whisper → RAG pipeline)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model TextChunk {
+  id          String   @id @default(uuid())
+  chunkIndex  Int      @map("chunk_index")
+  content     String
+  sourceType  String   @map("source_type")    // "ocr" | "whisper"
+  pageNumber  Int?     @map("page_number")    // for PDF chunks
+  startTime   Float?   @map("start_time")     // seconds (audio/video chunks)
+  endTime     Float?   @map("end_time")
+  vectorId    String?  @map("vector_id")      // ID in the FAISS/Chroma index
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  evidence    Evidence @relation(fields: [evidenceId], references: [id])
+  evidenceId  String   @map("evidence_id")
+
+  @@map("text_chunks")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDIT LOG  (immutable trail of every investigator action)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String                         // e.g. "UPLOAD_EVIDENCE", "RUN_ANALYSIS"
+  metadata  Json?                          // flexible extra context
+  ipAddress String?  @map("ip_address")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user      User?    @relation(fields: [userId], references: [id])
+  userId    String?  @map("user_id")
+  case      Case?    @relation(fields: [caseId], references: [id])
+  caseId    String?  @map("case_id")
+
+  @@map("audit_logs")
+}

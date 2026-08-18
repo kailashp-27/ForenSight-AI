@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+/* ── Design tokens ────────────────────────────────────────────────────────── */
+:root {
+  /* Forensic dark palette */
+  --color-bg:          #0a0c10;
+  --color-surface:     #111520;
+  --color-border:      #1e2535;
+  --color-accent:      #3b82f6;   /* electric blue */
+  --color-accent-dim:  #1d4ed8;
+  --color-warning:     #f59e0b;
+  --color-danger:      #ef4444;
+  --color-success:     #22c55e;
+  --color-text:        #e2e8f0;
+  --color-muted:       #64748b;
+}
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
