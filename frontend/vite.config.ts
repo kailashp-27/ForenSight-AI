@@ -13,11 +13,11 @@ export default defineConfig({
     proxy: {
       // Proxy all /api/* and /socket.io/* calls to the FastAPI backend
       "/api": {
-        target: "http://localhost:8000",
+        target: "http://localhost:8001",
         changeOrigin: true,
       },
       "/socket.io": {
-        target: "http://localhost:8000",
+        target: "http://localhost:8001",
         changeOrigin: true,
         ws: true, // Enable WebSocket proxying for Socket.io
       },

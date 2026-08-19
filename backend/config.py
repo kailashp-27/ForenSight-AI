@@ -22,6 +22,8 @@ class Settings(BaseSettings):
 
     # ── Database ───────────────────────────────────────────────────────────────
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/forensight"
+    # SQLite path used during local development (no PostgreSQL required)
+    SQLITE_PATH: str = "backend/database/forensight.db"
 
     # ── Storage ────────────────────────────────────────────────────────────────
     STORAGE_DIR: str = "backend/storage"
