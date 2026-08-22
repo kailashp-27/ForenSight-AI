@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     DEBUG: bool = False
 
     # ── Database ───────────────────────────────────────────────────────────────
-    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/forensight"
-    # SQLite path used during local development (no PostgreSQL required)
+    DATABASE_URL: str = "mysql://root:Priya2711!@localhost:3306/forensight"
+    # SQLite path used during local development (no PostgreSQL/MySQL required)
     SQLITE_PATH: str = "backend/database/forensight.db"
 
     # ── Storage ────────────────────────────────────────────────────────────────

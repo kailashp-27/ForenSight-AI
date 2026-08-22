@@ -1,109 +1,160 @@
 """
 backend/database/db.py
 ───────────────────────
-SQLite database setup using aiosqlite directly (no Prisma required for SQLite dev).
-Provides a lightweight async SQLite connection pool and table initialization.
-
-Switch to PostgreSQL + Prisma when moving to production:
-  1. Set DATABASE_URL to a postgres:// URL in .env
-  2. Run: prisma generate && prisma db push
+MySQL database setup using aiomysql.
+Provides an async MySQL connection pool and table initialization.
 """
 
-import aiosqlite
 import asyncio
-from pathlib import Path
+import json
+import uuid
+from urllib.parse import urlparse
+
+import aiomysql
 from backend.config import settings
 
-DB_PATH = Path(settings.SQLITE_PATH)
+# Global pool
+_pool: aiomysql.Pool = None
 
+def get_db_config():
+    """Parse DATABASE_URL into aiomysql connection kwargs."""
+    # mysql://root:password@localhost:3306/forensight
+    parsed = urlparse(settings.DATABASE_URL)
+    return {
+        "host": parsed.hostname,
+        "port": parsed.port or 3306,
+        "user": parsed.username,
+        "password": parsed.password,
+        "db": parsed.path.lstrip('/'),
+        "autocommit": False,
+        "cursorclass": aiomysql.DictCursor
+    }
 
-CREATE_TABLES_SQL = """
-CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    email TEXT UNIQUE NOT NULL,
-    display_name TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'INVESTIGATOR',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS cases (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    case_number TEXT UNIQUE NOT NULL,
-    title TEXT NOT NULL,
-    description TEXT,
-    status TEXT NOT NULL DEFAULT 'OPEN',
-    created_by_name TEXT NOT NULL DEFAULT 'System',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS evidence (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    case_id TEXT NOT NULL,
-    file_name TEXT NOT NULL,
-    file_type TEXT NOT NULL,
-    file_path TEXT NOT NULL,
-    file_size INTEGER NOT NULL,
-    mime_type TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'PENDING',
-    uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
-    processed_at TEXT,
-    FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS detections (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    evidence_id TEXT NOT NULL,
-    label TEXT NOT NULL,
-    confidence REAL NOT NULL,
-    bounding_box TEXT NOT NULL,
-    frame_timestamp REAL,
-    grad_cam_path TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (evidence_id) REFERENCES evidence(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS text_chunks (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    evidence_id TEXT NOT NULL,
-    chunk_index INTEGER NOT NULL,
-    content TEXT NOT NULL,
-    source_type TEXT NOT NULL,
-    page_number INTEGER,
-    start_time REAL,
-    end_time REAL,
-    vector_id TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (evidence_id) REFERENCES evidence(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS audit_logs (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    action TEXT NOT NULL,
-    metadata TEXT,
-    ip_address TEXT,
-    user_id TEXT,
-    case_id TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-"""
+CREATE_TABLES_SQL = [
+    """
+    CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(255) PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        display_name VARCHAR(255) NOT NULL,
+        role VARCHAR(50) NOT NULL DEFAULT 'INVESTIGATOR',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS cases (
+        id VARCHAR(255) PRIMARY KEY,
+        case_number VARCHAR(255) UNIQUE NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        description TEXT,
+        status VARCHAR(50) NOT NULL DEFAULT 'OPEN',
+        created_by_name VARCHAR(255) NOT NULL DEFAULT 'System',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS evidence (
+        id VARCHAR(255) PRIMARY KEY,
+        case_id VARCHAR(255) NOT NULL,
+        file_name VARCHAR(255) NOT NULL,
+        file_type VARCHAR(50) NOT NULL,
+        file_path VARCHAR(255) NOT NULL,
+        file_size BIGINT NOT NULL,
+        mime_type VARCHAR(100) NOT NULL,
+        status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+        uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        processed_at TIMESTAMP NULL,
+        FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS detections (
+        id VARCHAR(255) PRIMARY KEY,
+        evidence_id VARCHAR(255) NOT NULL,
+        label VARCHAR(255) NOT NULL,
+        confidence FLOAT NOT NULL,
+        bounding_box TEXT NOT NULL,
+        frame_timestamp FLOAT,
+        grad_cam_path VARCHAR(255),
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (evidence_id) REFERENCES evidence(id) ON DELETE CASCADE
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS text_chunks (
+        id VARCHAR(255) PRIMARY KEY,
+        evidence_id VARCHAR(255) NOT NULL,
+        chunk_index INT NOT NULL,
+        content TEXT NOT NULL,
+        source_type VARCHAR(50) NOT NULL,
+        page_number INT,
+        start_time FLOAT,
+        end_time FLOAT,
+        vector_id VARCHAR(255),
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (evidence_id) REFERENCES evidence(id) ON DELETE CASCADE
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS audit_logs (
+        id VARCHAR(255) PRIMARY KEY,
+        action VARCHAR(255) NOT NULL,
+        metadata TEXT,
+        ip_address VARCHAR(255),
+        user_id VARCHAR(255),
+        case_id VARCHAR(255),
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+]
 
 
 async def init_db() -> None:
-    """Create DB file and all tables on startup."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.executescript(CREATE_TABLES_SQL)
-        await db.commit()
-    print(f"[DB] SQLite initialised at {DB_PATH}")
+    """Create DB tables on startup using aiomysql."""
+    global _pool
+    config = get_db_config()
+    _pool = await aiomysql.create_pool(**config, minsize=1, maxsize=10)
+    
+    async with _pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            for query in CREATE_TABLES_SQL:
+                await cur.execute(query)
+        await conn.commit()
+    print(f"[DB] MySQL initialised for db: {config['db']}")
 
 
-async def get_db() -> aiosqlite.Connection:
-    """Open a short-lived connection for a single request."""
-    db = await aiosqlite.connect(DB_PATH)
-    db.row_factory = aiosqlite.Row
-    return db
+class _DBContextManager:
+    """A context manager compatible with both 'await get_db()' usage in current codebase,
+    which exposes execute(), commit(), close() and fetchall/fetchone behavior directly
+    if needed by the app."""
+    
+    def __init__(self, conn, cursor):
+        self.conn = conn
+        self.cursor = cursor
+        
+    async def execute(self, query, args=None):
+        await self.cursor.execute(query, args)
+        return self.cursor
+
+    async def commit(self):
+        await self.conn.commit()
+        
+    async def close(self):
+        await self.cursor.close()
+        self.conn.close()
+
+
+async def get_db():
+    """Open a short-lived connection wrapper for a single request."""
+    global _pool
+    if _pool is None:
+        config = get_db_config()
+        _pool = await aiomysql.create_pool(**config, minsize=1, maxsize=10)
+    
+    conn = await _pool.acquire()
+    cursor = await conn.cursor()
+    return _DBContextManager(conn, cursor)
 
 
 async def write_audit_log(
@@ -113,11 +164,11 @@ async def write_audit_log(
     ip_address: str | None = None,
 ) -> None:
     """Insert an immutable audit log entry."""
-    import json, uuid
-    async with aiosqlite.connect(DB_PATH) as db:
+    db = await get_db()
+    try:
         await db.execute(
             """INSERT INTO audit_logs (id, action, case_id, metadata, ip_address)
-               VALUES (?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s)""",
             (
                 str(uuid.uuid4()).replace("-", ""),
                 action,
@@ -127,3 +178,5 @@ async def write_audit_log(
             ),
         )
         await db.commit()
+    finally:
+        await db.close()

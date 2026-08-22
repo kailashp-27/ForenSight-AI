@@ -55,7 +55,7 @@ async def _process_evidence(evidence_id: str, file_path: str, file_type: str, si
     try:
         # Mark as PROCESSING
         await db.execute(
-            "UPDATE evidence SET status = 'PROCESSING' WHERE id = ?", (evidence_id,)
+            "UPDATE evidence SET status = 'PROCESSING' WHERE id = %s", (evidence_id,)
         )
         await db.commit()
 
@@ -72,7 +72,7 @@ async def _process_evidence(evidence_id: str, file_path: str, file_type: str, si
 
         # Simulate completion (remove when real processing is added)
         await db.execute(
-            "UPDATE evidence SET status = 'PENDING', processed_at = ? WHERE id = ?",
+            "UPDATE evidence SET status = 'PENDING', processed_at = %s WHERE id = %s",
             (datetime.utcnow().isoformat(), evidence_id),
         )
         await db.commit()
@@ -85,7 +85,7 @@ async def _process_evidence(evidence_id: str, file_path: str, file_type: str, si
         })
     except Exception as e:
         await db.execute(
-            "UPDATE evidence SET status = 'FAILED' WHERE id = ?", (evidence_id,)
+            "UPDATE evidence SET status = 'FAILED' WHERE id = %s", (evidence_id,)
         )
         await db.commit()
         await sio.emit("evidence:status_update", {
@@ -126,7 +126,7 @@ async def upload_evidence(
     # Verify case exists
     db = await get_db()
     try:
-        row = await db.execute("SELECT id FROM cases WHERE id = ?", (case_id,))
+        row = await db.execute("SELECT id FROM cases WHERE id = %s", (case_id,))
         if not await row.fetchone():
             raise HTTPException(status_code=404, detail="Case not found")
     finally:
@@ -150,7 +150,7 @@ async def upload_evidence(
         await db.execute(
             """INSERT INTO evidence
                (id, case_id, file_name, file_type, file_path, file_size, mime_type, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING')""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, 'PENDING')""",
             (
                 evidence_id,
                 case_id,
@@ -162,7 +162,7 @@ async def upload_evidence(
             ),
         )
         await db.commit()
-        row = await db.execute("SELECT * FROM evidence WHERE id = ?", (evidence_id,))
+        row = await db.execute("SELECT * FROM evidence WHERE id = %s", (evidence_id,))
         evidence = dict(await row.fetchone())
     finally:
         await db.close()
@@ -185,13 +185,13 @@ async def upload_evidence(
 async def get_evidence(evidence_id: str):
     db = await get_db()
     try:
-        row = await db.execute("SELECT * FROM evidence WHERE id = ?", (evidence_id,))
+        row = await db.execute("SELECT * FROM evidence WHERE id = %s", (evidence_id,))
         ev = dict(await row.fetchone() or {})
         if not ev:
             raise HTTPException(status_code=404, detail="Evidence not found")
 
         det_cursor = await db.execute(
-            "SELECT * FROM detections WHERE evidence_id = ? ORDER BY created_at",
+            "SELECT * FROM detections WHERE evidence_id = %s ORDER BY created_at",
             (evidence_id,),
         )
         ev["detections"] = [dict(r) for r in await det_cursor.fetchall()]
@@ -206,7 +206,7 @@ async def delete_evidence(evidence_id: str, request: Request):
     db = await get_db()
     try:
         row = await db.execute(
-            "SELECT file_path, case_id FROM evidence WHERE id = ?", (evidence_id,)
+            "SELECT file_path, case_id FROM evidence WHERE id = %s", (evidence_id,)
         )
         ev = dict(await row.fetchone() or {})
         if not ev:
@@ -217,7 +217,7 @@ async def delete_evidence(evidence_id: str, request: Request):
         if file_path.exists():
             file_path.unlink()
 
-        await db.execute("DELETE FROM evidence WHERE id = ?", (evidence_id,))
+        await db.execute("DELETE FROM evidence WHERE id = %s", (evidence_id,))
         await db.commit()
     finally:
         await db.close()

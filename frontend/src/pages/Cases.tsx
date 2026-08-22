@@ -1,7 +1,7 @@
 // frontend/src/pages/Cases.tsx
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, Search, FolderOpen, ChevronRight } from "lucide-react";
+import { Plus, Search, FolderOpen, ChevronRight, X } from "lucide-react";
 import { Badge, statusToVariant } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { useCaseStore } from "../store/caseStore";
@@ -26,7 +26,7 @@ export function Cases() {
   const filtered = cases.filter(
     (c) =>
       c.title.toLowerCase().includes(search.toLowerCase()) ||
-      c.case_number.toLowerCase().includes(search.toLowerCase())
+      c.case_number.toLowerCase().includes(search.toLowerCase()),
   );
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -46,54 +46,80 @@ export function Cases() {
   };
 
   return (
-    <div className="p-6 lg:p-8 animate-fade-in">
+    <div
+      style={{ padding: "1.5rem 2rem", display: "flex", flexDirection: "column", gap: "1.25rem", minHeight: "100%" }}
+      className="animate-fade-in"
+    >
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Investigation Cases</h1>
-          <p className="text-sm text-slate-500 mt-1">{cases.length} case{cases.length !== 1 ? "s" : ""} total</p>
+          <h1 style={{ fontSize: "1.375rem", fontWeight: 700, color: "var(--color-text-primary)" }}>
+            Investigation Cases
+          </h1>
+          <p style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginTop: 4 }}>
+            {loading ? "Loading…" : `${cases.length} case${cases.length !== 1 ? "s" : ""} total`}
+          </p>
         </div>
-        <Button icon={<Plus />} onClick={() => setShowModal(true)}>New Case</Button>
+        <Button
+          icon={<Plus style={{ width: 14, height: 14 }} />}
+          onClick={() => setShowModal(true)}
+        >
+          New Case
+        </Button>
       </div>
 
       {/* Search */}
-      <div className="relative mb-6 max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+      <div style={{ position: "relative", maxWidth: 320 }}>
+        <Search
+          style={{
+            position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)",
+            width: 14, height: 14, color: "var(--color-text-subtle)", pointerEvents: "none",
+          }}
+          aria-hidden="true"
+        />
         <input
           type="search"
-          placeholder="Search cases..."
+          placeholder="Search cases…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Search cases"
-          className="w-full h-10 pl-9 pr-4 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="input-dark"
+          style={{ paddingLeft: "2.25rem" }}
         />
       </div>
 
       {/* Table */}
-      <div className="card overflow-hidden">
+      <div className="card" style={{ overflow: "hidden", flex: 1 }}>
         {filtered.length === 0 && !loading ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <FolderOpen className="w-12 h-12 text-slate-200 mb-3" />
-            <h3 className="text-sm font-semibold text-slate-600">
+          <div
+            style={{
+              display: "flex", flexDirection: "column", alignItems: "center",
+              justifyContent: "center", padding: "4rem 1rem", textAlign: "center",
+            }}
+          >
+            <FolderOpen style={{ width: 40, height: 40, color: "var(--color-border-bright)", marginBottom: 12 }} />
+            <p style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--color-text-muted)" }}>
               {search ? "No matching cases" : "No cases yet"}
-            </h3>
-            <p className="text-xs text-slate-400 mt-1 mb-4">
+            </p>
+            <p style={{ fontSize: "0.75rem", color: "var(--color-text-subtle)", marginTop: 4, marginBottom: 16 }}>
               {search ? "Try a different search term." : "Create your first case to begin."}
             </p>
             {!search && (
-              <Button size="sm" icon={<Plus />} onClick={() => setShowModal(true)}>Create Case</Button>
+              <Button size="sm" icon={<Plus style={{ width: 12, height: 12 }} />} onClick={() => setShowModal(true)}>
+                Create Case
+              </Button>
             )}
           </div>
         ) : (
-          <table className="w-full text-sm" aria-label="Cases list">
+          <table className="dark-table" style={{ width: "100%", borderCollapse: "collapse" }} aria-label="Cases list">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-100">
-                <th className="text-left px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Case #</th>
-                <th className="text-left px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Title</th>
-                <th className="text-left px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
-                <th className="text-left px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Investigator</th>
-                <th className="text-left px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Evidence</th>
-                <th className="text-left px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Created</th>
+              <tr>
+                <th>Case #</th>
+                <th>Title</th>
+                <th>Status</th>
+                <th>Investigator</th>
+                <th>Evidence</th>
+                <th>Created</th>
                 <th className="sr-only">Open</th>
               </tr>
             </thead>
@@ -102,34 +128,34 @@ export function Cases() {
                 <tr
                   key={c?.id ?? i}
                   onClick={() => c && navigate(`/cases/${c.id}`)}
-                  className="border-b border-slate-50 hover:bg-blue-50/30 cursor-pointer transition-colors"
+                  style={{ cursor: c ? "pointer" : "default" }}
                 >
-                  <td className="px-6 py-4">
-                    {c ? <span className="font-mono text-xs text-slate-500">{c.case_number}</span>
-                       : <div className="h-4 w-24 bg-slate-100 rounded animate-pulse" />}
+                  <td>
+                    {c ? <span style={{ fontFamily: "monospace", fontSize: "0.72rem", color: "var(--color-text-subtle)" }}>{c.case_number}</span>
+                       : <div className="skeleton" style={{ height: 14, width: 80 }} />}
                   </td>
-                  <td className="px-6 py-4">
-                    {c ? <span className="font-medium text-slate-800">{c.title}</span>
-                       : <div className="h-4 w-48 bg-slate-100 rounded animate-pulse" />}
+                  <td>
+                    {c ? <span style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>{c.title}</span>
+                       : <div className="skeleton" style={{ height: 14, width: 160 }} />}
                   </td>
-                  <td className="px-6 py-4">
+                  <td>
                     {c ? <Badge variant={statusToVariant(c.status)} />
-                       : <div className="h-5 w-20 bg-slate-100 rounded-full animate-pulse" />}
+                       : <div className="skeleton" style={{ height: 20, width: 80, borderRadius: 999 }} />}
                   </td>
-                  <td className="px-6 py-4">
-                    {c ? <span className="text-slate-600">{c.created_by_name}</span>
-                       : <div className="h-4 w-28 bg-slate-100 rounded animate-pulse" />}
+                  <td>
+                    {c ? <span style={{ fontSize: "0.8rem", color: "var(--color-text-body)" }}>{c.created_by_name}</span>
+                       : <div className="skeleton" style={{ height: 14, width: 100 }} />}
                   </td>
-                  <td className="px-6 py-4">
-                    {c ? <span className="text-slate-600">{c.evidence_count ?? 0}</span>
-                       : <div className="h-4 w-8 bg-slate-100 rounded animate-pulse" />}
+                  <td>
+                    {c ? <span style={{ fontSize: "0.8rem", color: "var(--color-text-body)" }}>{c.evidence_count ?? 0}</span>
+                       : <div className="skeleton" style={{ height: 14, width: 32 }} />}
                   </td>
-                  <td className="px-6 py-4">
-                    {c ? <span className="font-mono text-xs text-slate-400">{formatDate(c.created_at)}</span>
-                       : <div className="h-4 w-20 bg-slate-100 rounded animate-pulse" />}
+                  <td>
+                    {c ? <span style={{ fontFamily: "monospace", fontSize: "0.72rem", color: "var(--color-text-subtle)" }}>{formatDate(c.created_at)}</span>
+                       : <div className="skeleton" style={{ height: 14, width: 80 }} />}
                   </td>
-                  <td className="px-6 py-4 text-right">
-                    {c && <ChevronRight className="w-4 h-4 text-slate-300" />}
+                  <td style={{ textAlign: "right" }}>
+                    {c && <ChevronRight style={{ width: 14, height: 14, color: "var(--color-text-subtle)" }} />}
                   </td>
                 </tr>
               ))}
@@ -138,48 +164,88 @@ export function Cases() {
         )}
       </div>
 
+      {/* Bottom padding so FAB orb doesn't overlap */}
+      <div style={{ height: "4rem" }} />
+
       {/* Create Case Modal */}
       {showModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          className="modal-backdrop"
           role="dialog"
           aria-modal="true"
           aria-label="Create new case"
+          onClick={(e) => e.target === e.currentTarget && setShowModal(false)}
         >
-          <div className="card w-full max-w-lg mx-4 animate-fade-in">
-            <div className="px-6 py-5 border-b border-slate-100">
-              <h2 className="text-base font-semibold text-slate-900">Create Investigation Case</h2>
+          <div
+            className="card animate-fade-in"
+            style={{ width: "100%", maxWidth: 480, margin: "0 1rem" }}
+          >
+            {/* Modal header */}
+            <div
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "1rem 1.25rem", borderBottom: "1px solid var(--color-border)",
+              }}
+            >
+              <h2 style={{ fontSize: "0.9375rem", fontWeight: 700, color: "var(--color-text-primary)" }}>
+                Create Investigation Case
+              </h2>
+              <button
+                onClick={() => setShowModal(false)}
+                style={{
+                  width: 28, height: 28, borderRadius: 6, cursor: "pointer",
+                  background: "transparent", border: "1px solid var(--color-border)",
+                  color: "var(--color-text-muted)", display: "flex",
+                  alignItems: "center", justifyContent: "center",
+                  transition: "background 0.15s",
+                }}
+                aria-label="Close modal"
+              >
+                <X style={{ width: 14, height: 14 }} />
+              </button>
             </div>
-            <form onSubmit={handleCreate} className="p-6 space-y-4">
+
+            <form onSubmit={handleCreate} style={{ padding: "1.25rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
               <div>
-                <label htmlFor="case-title" className="block text-sm font-medium text-slate-700 mb-1">
-                  Case Title <span className="text-red-500" aria-hidden="true">*</span>
+                <label
+                  htmlFor="case-title"
+                  style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text-body)", marginBottom: 6 }}
+                >
+                  Case Title <span style={{ color: "#ef4444" }} aria-hidden="true">*</span>
                 </label>
                 <input
                   id="case-title"
                   type="text"
-                  placeholder="e.g. Downtown Robbery 2026-08"
+                  placeholder="e.g. Downtown Fraud Investigation 2026"
                   value={form.title}
                   onChange={(e) => setForm({ ...form, title: e.target.value })}
                   required
-                  className="w-full h-11 px-3 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input-dark"
                 />
               </div>
+
               <div>
-                <label htmlFor="case-desc" className="block text-sm font-medium text-slate-700 mb-1">
+                <label
+                  htmlFor="case-desc"
+                  style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text-body)", marginBottom: 6 }}
+                >
                   Description
                 </label>
                 <textarea
                   id="case-desc"
                   rows={3}
-                  placeholder="Brief case summary..."
+                  placeholder="Brief case summary…"
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  className="input-dark"
                 />
               </div>
+
               <div>
-                <label htmlFor="investigator-name" className="block text-sm font-medium text-slate-700 mb-1">
+                <label
+                  htmlFor="investigator-name"
+                  style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text-body)", marginBottom: 6 }}
+                >
                   Lead Investigator
                 </label>
                 <input
@@ -187,15 +253,25 @@ export function Cases() {
                   type="text"
                   value={form.created_by_name}
                   onChange={(e) => setForm({ ...form, created_by_name: e.target.value })}
-                  className="w-full h-11 px-3 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input-dark"
                 />
               </div>
+
               {formError && (
-                <p className="text-sm text-red-600">{formError}</p>
+                <p style={{ fontSize: "0.8rem", color: "#ef4444" }}>{formError}</p>
               )}
-              <div className="flex justify-end gap-3 pt-2">
-                <Button type="button" variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
-                <Button type="submit" loading={creating} icon={<Plus />}>Create Case</Button>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem", paddingTop: 4 }}>
+                <Button type="button" variant="secondary" onClick={() => setShowModal(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  loading={creating}
+                  icon={<Plus style={{ width: 14, height: 14 }} />}
+                >
+                  Create Case
+                </Button>
               </div>
             </form>
           </div>

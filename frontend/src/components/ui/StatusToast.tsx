@@ -1,5 +1,5 @@
 // frontend/src/components/ui/StatusToast.tsx
-// Real-time Socket.io processing toast notifications
+// Real-time Socket.io processing toast notifications — dark theme
 import React from "react";
 import { X, CheckCircle, AlertTriangle } from "lucide-react";
 import { useSocketStore, type ProcessingToast } from "../../store/socketStore";
@@ -7,45 +7,76 @@ import { useSocketStore, type ProcessingToast } from "../../store/socketStore";
 function ToastItem({ toast }: { toast: ProcessingToast }) {
   const dismiss = useSocketStore((s) => s.dismissToast);
   const isCompleted = toast.status === "COMPLETED" || toast.status === "CLEARED";
-  const isFailed = toast.status === "FAILED";
+  const isFailed    = toast.status === "FAILED";
 
   return (
     <div
-      className="animate-slide-in-right bg-white border border-slate-200 rounded-xl shadow-elevated p-4 w-80"
+      className="animate-slide-in-right"
       role="alert"
       aria-live="polite"
+      style={{
+        background: "var(--color-bg-elevated)",
+        border: "1px solid var(--color-border-bright)",
+        borderRadius: 10,
+        boxShadow: "var(--shadow-elevated)",
+        padding: "0.875rem 1rem",
+        width: 300,
+      }}
     >
-      <div className="flex items-start gap-3">
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
         {/* Status Icon */}
-        <div className="flex-shrink-0 mt-0.5">
+        <div style={{ flexShrink: 0, marginTop: 2 }}>
           {isCompleted ? (
-            <CheckCircle className="w-5 h-5 text-emerald-500" />
+            <CheckCircle style={{ width: 16, height: 16, color: "#10b981" }} />
           ) : isFailed ? (
-            <AlertTriangle className="w-5 h-5 text-red-500" />
+            <AlertTriangle style={{ width: 16, height: 16, color: "#ef4444" }} />
           ) : (
-            <div className="relative flex h-3 w-3 mt-1">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-              <span className="relative inline-flex h-3 w-3 rounded-full bg-blue-600" />
+            <div className="live-dot" style={{ width: 10, height: 10 }}>
+              <span className="live-dot-ping" style={{ background: "rgba(59,130,246,0.5)" }} />
+              <span className="live-dot-core" style={{ width: 10, height: 10, background: "#3b82f6" }} />
             </div>
           )}
         </div>
 
         {/* Content */}
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-slate-800 truncate">{toast.file_name}</p>
-          <p className="text-xs text-slate-500 mt-0.5">{toast.message}</p>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p
+            style={{
+              fontSize: "0.78rem", fontWeight: 600,
+              color: "var(--color-text-primary)",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}
+          >
+            {toast.file_name}
+          </p>
+          <p style={{ fontSize: "0.7rem", color: "var(--color-text-muted)", marginTop: 2 }}>
+            {toast.message}
+          </p>
 
-          {/* Progress Bar */}
+          {/* Progress bar */}
           {!isCompleted && !isFailed && (
-            <div className="mt-2">
-              <div className="flex justify-between text-xs text-slate-400 mb-1">
+            <div style={{ marginTop: 8 }}>
+              <div
+                style={{
+                  display: "flex", justifyContent: "space-between",
+                  fontSize: "0.65rem", color: "var(--color-text-subtle)", marginBottom: 4,
+                }}
+              >
                 <span>{toast.status}</span>
-                <span>{toast.progress}%</span>
+                <span style={{ fontFamily: "monospace" }}>{toast.progress}%</span>
               </div>
-              <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
+              <div
+                style={{
+                  height: 2, background: "var(--color-border)",
+                  borderRadius: 2, overflow: "hidden",
+                }}
+              >
                 <div
-                  className="h-full bg-blue-600 rounded-full transition-all duration-300"
-                  style={{ width: `${toast.progress}%` }}
+                  style={{
+                    height: "100%", background: "var(--color-accent)",
+                    borderRadius: 2, width: `${toast.progress}%`,
+                    transition: "width 0.3s ease",
+                  }}
                 />
               </div>
             </div>
@@ -55,10 +86,16 @@ function ToastItem({ toast }: { toast: ProcessingToast }) {
         {/* Dismiss */}
         <button
           onClick={() => dismiss(toast.evidence_id)}
-          className="flex-shrink-0 text-slate-400 hover:text-slate-600 transition-colors"
+          style={{
+            flexShrink: 0, background: "transparent", border: "none",
+            color: "var(--color-text-subtle)", cursor: "pointer",
+            transition: "color 0.15s",
+          }}
           aria-label="Dismiss notification"
+          onMouseEnter={e => (e.currentTarget.style.color = "var(--color-text-body)")}
+          onMouseLeave={e => (e.currentTarget.style.color = "var(--color-text-subtle)")}
         >
-          <X className="w-4 h-4" />
+          <X style={{ width: 14, height: 14 }} />
         </button>
       </div>
     </div>
@@ -70,7 +107,17 @@ export function StatusToastContainer() {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+    <div
+      style={{
+        position: "fixed",
+        bottom: "calc(var(--strip-h) + 16px)",
+        right: "1rem",
+        zIndex: 50,
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.5rem",
+      }}
+    >
       {toasts.map((toast) => (
         <ToastItem key={toast.evidence_id} toast={toast} />
       ))}

@@ -8,7 +8,8 @@ python-multipart==0.0.12        # Required for FastAPI file uploads
 
 # ─── Database & ORM ───────────────────────────────────────────────────────────
 prisma==0.15.0                  # Prisma Python client (wraps Prisma CLI)
-asyncpg==0.30.0                 # Async PostgreSQL driver
+aiomysql==0.2.0                 # Async MySQL driver
+cryptography==41.0.7            # Needed for aiomysql modern auth
 
 # ─── Configuration & Utilities ────────────────────────────────────────────────
 pydantic-settings==2.6.1        # Typed settings management via .env

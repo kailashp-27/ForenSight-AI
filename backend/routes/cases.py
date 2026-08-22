@@ -62,11 +62,11 @@ async def create_case(payload: CaseCreate, request: Request):
     try:
         await db.execute(
             """INSERT INTO cases (id, case_number, title, description, created_by_name)
-               VALUES (?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s)""",
             (case_id, case_number, payload.title, payload.description, payload.created_by_name),
         )
         await db.commit()
-        row = await db.execute("SELECT * FROM cases WHERE id = ?", (case_id,))
+        row = await db.execute("SELECT * FROM cases WHERE id = %s", (case_id,))
         case = _row_to_dict(await row.fetchone())
     finally:
         await db.close()
@@ -104,13 +104,13 @@ async def list_cases():
 async def get_case(case_id: str):
     db = await get_db()
     try:
-        row = await db.execute("SELECT * FROM cases WHERE id = ?", (case_id,))
+        row = await db.execute("SELECT * FROM cases WHERE id = %s", (case_id,))
         case = _row_to_dict(await row.fetchone())
         if not case:
             raise HTTPException(status_code=404, detail="Case not found")
 
         ev_cursor = await db.execute(
-            "SELECT * FROM evidence WHERE case_id = ? ORDER BY uploaded_at DESC",
+            "SELECT * FROM evidence WHERE case_id = %s ORDER BY uploaded_at DESC",
             (case_id,),
         )
         evidence = [dict(r) for r in await ev_cursor.fetchall()]
@@ -125,7 +125,7 @@ async def get_case(case_id: str):
 async def update_case(case_id: str, payload: CaseUpdate, request: Request):
     db = await get_db()
     try:
-        row = await db.execute("SELECT id FROM cases WHERE id = ?", (case_id,))
+        row = await db.execute("SELECT id FROM cases WHERE id = %s", (case_id,))
         if not await row.fetchone():
             raise HTTPException(status_code=404, detail="Case not found")
 
@@ -133,13 +133,13 @@ async def update_case(case_id: str, payload: CaseUpdate, request: Request):
         if not updates:
             raise HTTPException(status_code=400, detail="No fields to update")
 
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        set_clause = ", ".join(f"{k} = %s" for k in updates)
         values = list(updates.values()) + [datetime.utcnow().isoformat(), case_id]
         await db.execute(
-            f"UPDATE cases SET {set_clause}, updated_at = ? WHERE id = ?", values
+            f"UPDATE cases SET {set_clause}, updated_at = %s WHERE id = %s", values
         )
         await db.commit()
-        row = await db.execute("SELECT * FROM cases WHERE id = ?", (case_id,))
+        row = await db.execute("SELECT * FROM cases WHERE id = %s", (case_id,))
         case = _row_to_dict(await row.fetchone())
     finally:
         await db.close()
@@ -157,10 +157,10 @@ async def update_case(case_id: str, payload: CaseUpdate, request: Request):
 async def delete_case(case_id: str, request: Request):
     db = await get_db()
     try:
-        row = await db.execute("SELECT id FROM cases WHERE id = ?", (case_id,))
+        row = await db.execute("SELECT id FROM cases WHERE id = %s", (case_id,))
         if not await row.fetchone():
             raise HTTPException(status_code=404, detail="Case not found")
-        await db.execute("DELETE FROM cases WHERE id = ?", (case_id,))
+        await db.execute("DELETE FROM cases WHERE id = %s", (case_id,))
         await db.commit()
     finally:
         await db.close()

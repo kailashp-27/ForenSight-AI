@@ -2,8 +2,8 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
-  ChevronRight, Upload, FileVideo, FileImage, FileAudio, FileText, File,
-  MoreHorizontal, Trash2, ArrowLeft,
+  ChevronRight, Upload, FileVideo, FileImage, FileAudio,
+  FileText, File, MoreHorizontal, ArrowLeft, AlertTriangle,
 } from "lucide-react";
 import { Badge, statusToVariant } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -21,12 +21,12 @@ function formatSize(bytes: number): string {
 }
 
 function EvidenceIcon({ type }: { type: string }) {
-  const cls = "w-5 h-5";
-  if (type === "VIDEO")    return <FileVideo className={`${cls} text-blue-500`} />;
-  if (type === "IMAGE")    return <FileImage className={`${cls} text-emerald-500`} />;
-  if (type === "AUDIO")    return <FileAudio className={`${cls} text-violet-500`} />;
-  if (type === "DOCUMENT") return <FileText className={`${cls} text-orange-500`} />;
-  return <File className={`${cls} text-slate-400`} />;
+  const s = { width: 16, height: 16 };
+  if (type === "VIDEO")    return <FileVideo  style={{ ...s, color: "#3b82f6" }} />;
+  if (type === "IMAGE")    return <FileImage  style={{ ...s, color: "#10b981" }} />;
+  if (type === "AUDIO")    return <FileAudio  style={{ ...s, color: "#8b5cf6" }} />;
+  if (type === "DOCUMENT") return <FileText   style={{ ...s, color: "#f59e0b" }} />;
+  return <File style={{ ...s, color: "var(--color-text-subtle)" }} />;
 }
 
 export function CaseDetail() {
@@ -34,22 +34,21 @@ export function CaseDetail() {
   const { selectedCase, loading, fetchCase } = useCaseStore();
   const [showUpload, setShowUpload] = useState(false);
 
-  useEffect(() => {
-    if (id) fetchCase(id);
-  }, [id, fetchCase]);
+  useEffect(() => { if (id) fetchCase(id); }, [id, fetchCase]);
 
   const handleUploadSuccess = () => {
     if (id) fetchCase(id);
     setTimeout(() => setShowUpload(false), 2000);
   };
 
+  /* ── Loading skeleton ── */
   if (loading && !selectedCase) {
     return (
-      <div className="p-8">
-        <div className="h-8 w-48 bg-slate-100 rounded animate-pulse mb-6" />
-        <div className="card p-6 space-y-3">
+      <div style={{ padding: "1.5rem 2rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
+        <div className="skeleton" style={{ height: 16, width: 200 }} />
+        <div className="card" style={{ padding: "1.25rem" }}>
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-5 bg-slate-100 rounded animate-pulse" style={{ width: `${80 - i * 15}%` }} />
+            <div key={i} className="skeleton" style={{ height: 14, marginBottom: 10, width: `${80 - i * 15}%` }} />
           ))}
         </div>
       </div>
@@ -58,9 +57,14 @@ export function CaseDetail() {
 
   if (!selectedCase) {
     return (
-      <div className="p-8 text-center">
-        <p className="text-slate-500">Case not found.</p>
-        <Link to="/cases" className="text-blue-600 text-sm mt-2 inline-block">← Back to Cases</Link>
+      <div style={{ padding: "2rem", textAlign: "center" }}>
+        <p style={{ color: "var(--color-text-muted)", fontSize: "0.875rem" }}>Case not found.</p>
+        <Link
+          to="/cases"
+          style={{ color: "var(--color-accent)", fontSize: "0.8rem", marginTop: 8, display: "inline-block" }}
+        >
+          ← Back to Cases
+        </Link>
       </div>
     );
   }
@@ -68,99 +72,202 @@ export function CaseDetail() {
   const evidence: Evidence[] = selectedCase.evidence ?? [];
 
   return (
-    <div className="p-6 lg:p-8 animate-fade-in">
+    <div
+      style={{ padding: "1.5rem 2rem", display: "flex", flexDirection: "column", gap: "1.25rem", minHeight: "100%" }}
+      className="animate-fade-in"
+    >
+      {/* AI Disclaimer */}
+      <div className="ai-disclaimer" style={{ borderRadius: 8 }}>
+        <AlertTriangle style={{ width: 11, height: 11, flexShrink: 0 }} aria-hidden="true" />
+        <span>
+          AI analysis results are assistive only. All detections require human verification before any legal use.
+        </span>
+      </div>
+
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-sm text-slate-400 mb-6" aria-label="Breadcrumb">
-        <Link to="/cases" className="hover:text-slate-600 transition-colors flex items-center gap-1">
-          <ArrowLeft className="w-3.5 h-3.5" /> Cases
+      <nav
+        style={{
+          display: "flex", alignItems: "center", gap: 6,
+          fontSize: "0.75rem", color: "var(--color-text-muted)",
+        }}
+        aria-label="Breadcrumb"
+      >
+        <Link
+          to="/cases"
+          style={{
+            color: "var(--color-text-muted)", textDecoration: "none",
+            display: "flex", alignItems: "center", gap: 4, transition: "color 0.15s",
+          }}
+          onMouseEnter={e => (e.currentTarget.style.color = "var(--color-text-body)")}
+          onMouseLeave={e => (e.currentTarget.style.color = "var(--color-text-muted)")}
+        >
+          <ArrowLeft style={{ width: 12, height: 12 }} /> Cases
         </Link>
-        <ChevronRight className="w-3.5 h-3.5" />
-        <span className="text-slate-700 font-medium">{selectedCase.case_number}</span>
+        <ChevronRight style={{ width: 12, height: 12 }} />
+        <span style={{ color: "var(--color-text-body)", fontWeight: 500 }}>
+          {selectedCase.case_number}
+        </span>
       </nav>
 
-      {/* Case Header */}
-      <div className="card p-6 mb-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-3 mb-2 flex-wrap">
-              <span className="font-mono text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded">
+      {/* Case Header card */}
+      <div className="card" style={{ padding: "1.25rem" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+              <span
+                style={{
+                  fontFamily: "monospace", fontSize: "0.7rem",
+                  color: "var(--color-text-subtle)",
+                  background: "var(--color-bg-elevated)",
+                  border: "1px solid var(--color-border)",
+                  borderRadius: 4, padding: "2px 6px",
+                }}
+              >
                 {selectedCase.case_number}
               </span>
               <Badge variant={statusToVariant(selectedCase.status)} />
             </div>
-            <h1 className="text-xl font-bold text-slate-900 mb-1">{selectedCase.title}</h1>
+
+            <h1
+              style={{
+                fontSize: "1.25rem", fontWeight: 700,
+                color: "var(--color-text-primary)", lineHeight: 1.3, marginBottom: 4,
+              }}
+            >
+              {selectedCase.title}
+            </h1>
+
             {selectedCase.description && (
-              <p className="text-sm text-slate-500">{selectedCase.description}</p>
+              <p style={{ fontSize: "0.8rem", color: "var(--color-text-muted)", lineHeight: 1.5, marginBottom: 10 }}>
+                {selectedCase.description}
+              </p>
             )}
-            <div className="flex items-center gap-4 mt-3 text-xs text-slate-400">
-              <span>Investigator: <span className="text-slate-600 font-medium">{selectedCase.created_by_name}</span></span>
-              <span>Created: <span className="font-mono">{formatDate(selectedCase.created_at)}</span></span>
-              <span>Evidence: <span className="text-slate-600 font-medium">{evidence.length}</span></span>
+
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+              {[
+                { label: "Investigator", value: selectedCase.created_by_name },
+                { label: "Created",      value: formatDate(selectedCase.created_at) },
+                { label: "Evidence",     value: `${evidence.length} file${evidence.length !== 1 ? "s" : ""}` },
+              ].map((m) => (
+                <div key={m.label}>
+                  <span style={{ fontSize: "0.65rem", color: "var(--color-text-subtle)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    {m.label}
+                  </span>
+                  <p style={{ fontSize: "0.8rem", color: "var(--color-text-body)", fontWeight: 500, marginTop: 1 }}>
+                    {m.value}
+                  </p>
+                </div>
+              ))}
             </div>
           </div>
-          <Button icon={<Upload />} onClick={() => setShowUpload(true)}>
+
+          <Button
+            icon={<Upload style={{ width: 14, height: 14 }} />}
+            onClick={() => setShowUpload(true)}
+          >
             Upload Evidence
           </Button>
         </div>
       </div>
 
-      {/* Evidence Section */}
-      <div className="card overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <h2 className="text-sm font-semibold text-slate-800">Evidence Files</h2>
-          <span className="text-xs text-slate-400">{evidence.length} file{evidence.length !== 1 ? "s" : ""}</span>
+      {/* Evidence section */}
+      <div className="card" style={{ overflow: "hidden", flex: 1 }}>
+        <div
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "0.875rem 1.25rem", borderBottom: "1px solid var(--color-border)",
+          }}
+        >
+          <h2 style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--color-text-primary)" }}>
+            Evidence Files
+          </h2>
+          <span style={{ fontSize: "0.7rem", color: "var(--color-text-subtle)" }}>
+            {evidence.length} file{evidence.length !== 1 ? "s" : ""}
+          </span>
         </div>
 
         {evidence.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <Upload className="w-12 h-12 text-slate-200 mb-3" />
-            <h3 className="text-sm font-semibold text-slate-600">No evidence uploaded</h3>
-            <p className="text-xs text-slate-400 mt-1 mb-4">
+          <div
+            style={{
+              display: "flex", flexDirection: "column", alignItems: "center",
+              justifyContent: "center", padding: "3rem 1rem", textAlign: "center",
+            }}
+          >
+            <Upload style={{ width: 40, height: 40, color: "var(--color-border-bright)", marginBottom: 12 }} />
+            <p style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--color-text-muted)" }}>
+              No evidence uploaded
+            </p>
+            <p style={{ fontSize: "0.75rem", color: "var(--color-text-subtle)", marginTop: 4, marginBottom: 16 }}>
               Upload CCTV footage, images, audio, or documents to begin AI analysis.
             </p>
-            <Button size="sm" icon={<Upload />} onClick={() => setShowUpload(true)}>
+            <Button size="sm" icon={<Upload style={{ width: 12, height: 12 }} />} onClick={() => setShowUpload(true)}>
               Upload Evidence
             </Button>
           </div>
         ) : (
-          <table className="w-full text-sm" aria-label="Evidence files">
+          <table className="dark-table" style={{ width: "100%", borderCollapse: "collapse" }} aria-label="Evidence files">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-100">
-                <th className="text-left px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">File</th>
-                <th className="text-left px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Type</th>
-                <th className="text-left px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
-                <th className="text-left px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Size</th>
-                <th className="text-left px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Uploaded</th>
+              <tr>
+                <th>File</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Size</th>
+                <th>Uploaded</th>
                 <th className="sr-only">Actions</th>
               </tr>
             </thead>
             <tbody>
               {evidence.map((ev) => (
-                <tr key={ev.id} className="border-b border-slate-50 hover:bg-slate-50/70 transition-colors">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
+                <tr key={ev.id}>
+                  <td>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <EvidenceIcon type={ev.file_type} />
-                      <span className="font-medium text-slate-700 truncate max-w-[200px]">{ev.file_name}</span>
+                      <span
+                        style={{
+                          fontWeight: 500, color: "var(--color-text-primary)",
+                          maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}
+                      >
+                        {ev.file_name}
+                      </span>
                     </div>
                   </td>
-                  <td className="px-6 py-4">
-                    <span className="text-slate-500 text-xs uppercase tracking-wide font-mono">{ev.file_type}</span>
+                  <td>
+                    <span
+                      style={{
+                        fontFamily: "monospace", fontSize: "0.65rem",
+                        textTransform: "uppercase", letterSpacing: "0.06em",
+                        color: "var(--color-text-subtle)",
+                      }}
+                    >
+                      {ev.file_type}
+                    </span>
                   </td>
-                  <td className="px-6 py-4">
+                  <td>
                     <Badge variant={statusToVariant(ev.status)} />
                   </td>
-                  <td className="px-6 py-4">
-                    <span className="font-mono text-xs text-slate-400">{formatSize(ev.file_size)}</span>
+                  <td>
+                    <span style={{ fontFamily: "monospace", fontSize: "0.72rem", color: "var(--color-text-subtle)" }}>
+                      {formatSize(ev.file_size)}
+                    </span>
                   </td>
-                  <td className="px-6 py-4">
-                    <span className="font-mono text-xs text-slate-400">{formatDate(ev.uploaded_at)}</span>
+                  <td>
+                    <span style={{ fontFamily: "monospace", fontSize: "0.72rem", color: "var(--color-text-subtle)" }}>
+                      {formatDate(ev.uploaded_at)}
+                    </span>
                   </td>
-                  <td className="px-6 py-4 text-right">
+                  <td style={{ textAlign: "right" }}>
                     <button
-                      className="text-slate-300 hover:text-slate-500 transition-colors"
+                      style={{
+                        background: "transparent", border: "none",
+                        color: "var(--color-text-subtle)", cursor: "pointer",
+                        transition: "color 0.15s",
+                      }}
                       aria-label={`Options for ${ev.file_name}`}
+                      onMouseEnter={e => (e.currentTarget.style.color = "var(--color-text-body)")}
+                      onMouseLeave={e => (e.currentTarget.style.color = "var(--color-text-subtle)")}
                     >
-                      <MoreHorizontal className="w-4 h-4" />
+                      <MoreHorizontal style={{ width: 14, height: 14 }} />
                     </button>
                   </td>
                 </tr>
@@ -170,26 +277,48 @@ export function CaseDetail() {
         )}
       </div>
 
+      {/* Bottom padding so FAB orb doesn't overlap */}
+      <div style={{ height: "4rem" }} />
+
       {/* Upload Wizard Modal */}
       {showUpload && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          className="modal-backdrop"
           role="dialog"
           aria-modal="true"
           aria-label="Upload evidence"
+          onClick={(e) => e.target === e.currentTarget && setShowUpload(false)}
         >
-          <div className="card w-full max-w-lg mx-4 h-[600px] flex flex-col animate-fade-in overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
-              <h2 className="text-base font-semibold text-slate-900">Upload Evidence</h2>
+          <div
+            className="card animate-fade-in"
+            style={{
+              width: "100%", maxWidth: 480, margin: "0 1rem",
+              maxHeight: "80vh", display: "flex", flexDirection: "column", overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "1rem 1.25rem", borderBottom: "1px solid var(--color-border)", flexShrink: 0,
+              }}
+            >
+              <h2 style={{ fontSize: "0.9375rem", fontWeight: 700, color: "var(--color-text-primary)" }}>
+                Upload Evidence
+              </h2>
               <button
                 onClick={() => setShowUpload(false)}
-                className="text-slate-400 hover:text-slate-600 transition-colors"
+                style={{
+                  background: "transparent", border: "1px solid var(--color-border)",
+                  borderRadius: 6, width: 28, height: 28, display: "flex",
+                  alignItems: "center", justifyContent: "center",
+                  color: "var(--color-text-muted)", cursor: "pointer", fontSize: "0.875rem",
+                }}
                 aria-label="Close upload wizard"
               >
                 ✕
               </button>
             </div>
-            <div className="flex-1 overflow-hidden">
+            <div style={{ flex: 1, overflow: "hidden" }}>
               <EvidenceUploadWizard
                 caseId={selectedCase.id}
                 onSuccess={handleUploadSuccess}

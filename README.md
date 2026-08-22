@@ -53,7 +53,7 @@ ForenSight-AI/
 ### Prerequisites
 - Python 3.11+
 - Node.js 18+
-- PostgreSQL (running locally or via Docker)
+- MySQL (running locally or via Docker)
 - Ollama (for Phase 4)
 
 ### 1. Backend
@@ -73,11 +73,10 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your DATABASE_URL
 
-# Generate Prisma client & push schema
+# (Optional) Generate Prisma client if using Prisma ORM features in the future
 prisma generate --schema=backend/database/schema.prisma
-prisma db push  --schema=backend/database/schema.prisma
 
-# Run the dev server
+# Run the dev server (MySQL tables will be auto-created on startup)
 uvicorn backend.main:socket_app --reload --port 8000
 ```
 
