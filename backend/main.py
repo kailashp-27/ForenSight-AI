@@ -58,15 +58,17 @@ app.add_middleware(
 )
 
 # ── Route registration ─────────────────────────────────────────────────────────
-from backend.routes import cases, evidence
+from backend.routes import cases, evidence, analysis
 
 app.include_router(cases.router,    prefix="/api/cases",    tags=["Cases"])
 app.include_router(evidence.router, prefix="/api/evidence", tags=["Evidence"])
+app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
 
-# Placeholder routers (uncomment when implemented)
-# from backend.routes import analysis, chat
-# app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
-# app.include_router(chat.router,     prefix="/api/chat",     tags=["Chat"])
+# Direct media endpoint alias for frontend convenience
+@app.get("/api/media/{evidence_id}", tags=["Media"])
+async def direct_media_stream(evidence_id: str):
+    return await evidence.stream_media(evidence_id)
+
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

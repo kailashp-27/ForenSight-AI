@@ -3,15 +3,15 @@
 /* ── Design Tokens — Dark-First Investigation Hub ─────────────────────────── */
 :root {
   /* ── Canvas & Page ── */
-  --color-bg-page:          #070c18;   /* deep navy-black */
-  --color-bg-canvas:        #0b1120;   /* dark navy — focus canvas */
-  --color-bg-card:          #111827;   /* slate-900 equivalent */
-  --color-bg-card-hover:    #1a2336;
-  --color-bg-elevated:      #162032;   /* lifted panels */
-  --color-bg-header:        #0d1526;   /* top bar */
-  --color-bg-strip:         #0f1929;   /* intelligence strip */
-  --color-bg-panel:         #0d1526;   /* context panel */
-  --color-bg-input:         #162032;
+  --color-bg-page:          #0A0712;   /* very dark ink violet */
+  --color-bg-canvas:        #0A0712;   /* very dark ink violet */
+  --color-bg-card:          #150F24;   /* deep purple-gray */
+  --color-bg-card-hover:    #21183c;
+  --color-bg-elevated:      #1a122f;   /* lifted panels */
+  --color-bg-header:        #150F24;   /* top bar */
+  --color-bg-strip:         #150F24;   /* intelligence strip */
+  --color-bg-panel:         #150F24;   /* context panel */
+  --color-bg-input:         #1a122f;
   --color-bg-modal:         rgba(0, 0, 0, 0.75);
 
   /* ── Borders ── */
@@ -20,17 +20,17 @@
   --color-border-bright:    #2a3f5f;
 
   /* ── Primary Accent ── */
-  --color-accent:           #3b82f6;   /* blue-500 */
-  --color-accent-hover:     #2563eb;   /* blue-600 */
-  --color-accent-light:     rgba(59, 130, 246, 0.1);
-  --color-accent-glow:      rgba(59, 130, 246, 0.25);
+  --color-accent:           #A855F7;   /* vibrant digital violet */
+  --color-accent-hover:     #9333ea;   /* darker violet */
+  --color-accent-light:     rgba(168, 85, 247, 0.1);
+  --color-accent-glow:      rgba(168, 85, 247, 0.25);
 
-  /* ── Teal secondary ── */
-  --color-teal:             #14b8a6;
-  --color-teal-light:       rgba(20, 184, 166, 0.1);
+  /* ── Secondary Accent ── */
+  --color-teal:             #F43F5E;   /* electric rose magenta */
+  --color-teal-light:       rgba(244, 63, 94, 0.1);
 
   /* ── Text ── */
-  --color-text-primary:     #f0f4ff;
+  --color-text-primary:     #F1EEF7;
   --color-text-body:        #b8c5d9;
   --color-text-muted:       #6b7fa3;
   --color-text-subtle:      #3d5070;

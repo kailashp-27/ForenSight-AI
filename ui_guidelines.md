@@ -119,9 +119,13 @@ font-family: 'Geist Mono', 'Courier New', monospace;
   --color-border-dark:  #1e293b;   /* slate-800 — dark surface borders */
 
   /* Primary Accent — Trust & Action */
-  --color-accent:       #2563eb;   /* blue-600 */
-  --color-accent-hover: #1d4ed8;   /* blue-700 */
-  --color-accent-light: #eff6ff;   /* blue-50 — selected rows, active states */
+  --color-accent:       #A855F7;   /* vibrant digital violet */
+  --color-accent-hover: #9333ea;   /* darker violet */
+  --color-accent-light: rgba(168, 85, 247, 0.1);
+
+  /* Secondary Accent */
+  --color-teal:         #F43F5E;   /* electric rose magenta */
+  --color-teal-light:   rgba(244, 63, 94, 0.1);
 
   /* Text */
   --color-text-primary: #0f172a;   /* slate-900 */
@@ -167,16 +171,16 @@ font-family: 'Geist Mono', 'Courier New', monospace;
 
 ```css
 [data-theme="dark"] {
-  --color-bg-page:     #0b1120;   /* very dark navy */
-  --color-bg-card:     #1e293b;   /* slate-800 */
-  --color-bg-canvas:   #020617;   /* near-black */
-  --color-bg-sidebar:  #020617;   /* near-black */
-  --color-bg-header:   #1e293b;   /* slate-800 */
+  --color-bg-page:     #0A0712;   /* very dark ink violet */
+  --color-bg-card:     #150F24;   /* deep purple-gray */
+  --color-bg-canvas:   #0A0712;   /* very dark ink violet */
+  --color-bg-sidebar:  #0A0712;   /* very dark ink violet */
+  --color-bg-header:   #150F24;   /* deep purple-gray */
   
   --color-border:      #334155;   /* slate-700 */
   --color-border-dark: #475569;   /* slate-600 */
   
-  --color-text-primary:#f1f5f9;   /* slate-100 */
+  --color-text-primary:#F1EEF7;   /* lavender mist white */
   --color-text-body:   #cbd5e1;   /* slate-300 */
   --color-text-muted:  #94a3b8;   /* slate-400 */
   --color-text-subtle: #64748b;   /* slate-500 */
@@ -397,19 +401,6 @@ background: var(--color-accent-light);
   <span className="text-xs font-medium text-blue-600">
     {showHeatmap ? 'Showing Grad-CAM Overlay' : 'Hidden'}
   </span>
-</div>
-```
-
-### 5.9. AI Disclaimer Banner (Permanent)
-
-```tsx
-// Pinned to top of every AI/LLM output section, NEVER removable
-<div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border-b border-amber-200">
-  <AlertTriangleIcon className="w-4 h-4 text-amber-600 flex-shrink-0" />
-  <p className="text-xs text-amber-700">
-    AI-generated summaries are for assistive purposes only.
-    Do not use for definitive legal conclusions.
-  </p>
 </div>
 ```
 
@@ -651,8 +642,7 @@ When a list/table has no data:
 
 ## 10. Ethical Guardrail UI Rules (NON-NEGOTIABLE)
 
-1. **The AI disclaimer banner** (§5.9) must appear on EVERY page that shows AI-generated content. It cannot be dismissed, minimized, or hidden by CSS.
-2. **REVIEW REQUIRED badge** (amber) must be shown for ANY evidence that was flagged by YOLOv8 or the texture classifier. It must never auto-clear without human confirmation.
+1. **REVIEW REQUIRED badge** (amber) must be shown for ANY evidence that was flagged by YOLOv8 or the texture classifier. It must never auto-clear without human confirmation.
 3. **Hold Point steps** in the upload wizard must use `disabled={!accepted}` on the Next button. Never bypass with JavaScript trickery.
 4. **Confidence scores** must always be displayed alongside detections (e.g., "Firearm — 84% confidence"). Never show a label without its confidence.
 5. **Grad-CAM overlay** must default to OFF (`showHeatmap = false`) and require explicit toggle by the investigator.
@@ -736,7 +726,6 @@ frontend/src/
 │   │   ├── EvidenceCard.tsx
 │   │   └── EvidenceTable.tsx
 │   ├── ai/
-│   │   ├── AiDisclaimerBanner.tsx   ← ALWAYS include in AI sections
 │   │   ├── DetectionBadge.tsx       ← YOLOv8 detection pill
 │   │   ├── GradCamToggle.tsx
 │   │   └── AuditTimeline.tsx
@@ -768,7 +757,6 @@ frontend/src/
 - Use `Geist` for all text, `Geist Mono` for IDs and data
 - Use semantic status colors strictly as defined in §3
 - Always show confidence % alongside AI detections
-- Always include the AI disclaimer banner in AI sections
 - Keep buttons large (h-11 minimum)
 - Add `transition-*` classes to all interactive elements
 - Use `rounded-xl` for cards, `rounded-lg` for inputs, `rounded-full` for badges
@@ -782,7 +770,6 @@ frontend/src/
 - Don't use red for anything other than critical errors or destructive actions
 - Don't use green for anything other than successfully completed processing
 - Don't add decorative gradients to functional UI elements
-- Don't remove or hide the AI disclaimer banner
 - Don't auto-confirm Hold Point steps programmatically
 - Don't use `outline-none` without a focus ring replacement
 - Don't commit `node_modules/`, `.venv/`, or `backend/storage/*` to git

@@ -87,13 +87,7 @@ export function Dashboard() {
       style={{ padding: "1.5rem 2rem", minHeight: "100%", display: "flex", flexDirection: "column", gap: "1.5rem" }}
       className="animate-fade-in"
     >
-      {/* AI Disclaimer */}
-      <div className="ai-disclaimer" style={{ borderRadius: 8 }}>
-        <AlertTriangle style={{ width: 12, height: 12, flexShrink: 0 }} aria-hidden="true" />
-        <span>
-          AI-generated insights are for assistive purposes only. Do not use for definitive legal conclusions.
-        </span>
-      </div>
+
 
       {/* Page header */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
@@ -193,8 +187,8 @@ export function Dashboard() {
         </div>
 
         {/* Timeline */}
-        <div style={{ padding: "0.5rem 0", overflowX: "auto" }}>
-          <div style={{ minWidth: 700 }}>
+        <div style={{ padding: "0.5rem 0" }}>
+          <div>
             <TimelineView onEventClick={handleTimelineEvent} />
           </div>
         </div>

@@ -20,19 +20,9 @@ export function GlobalContextBar({ onSearchChange }: GlobalContextBarProps) {
     <header className="hub-header" role="banner">
       {/* Logo */}
       <div className="flex items-center gap-2.5 flex-shrink-0">
-        <div
-          style={{
-            width: 32, height: 32, borderRadius: 8,
-            background: "linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            boxShadow: "0 0 12px rgba(59,130,246,0.4)",
-          }}
-        >
-          <Shield style={{ width: 16, height: 16, color: "white" }} aria-hidden="true" />
-        </div>
         <div>
           <p style={{ fontSize: "0.875rem", fontWeight: 700, color: "var(--color-text-primary)", lineHeight: 1 }}>
-            ForenSight
+            ForenSight AI
           </p>
           <p style={{ fontSize: "0.65rem", color: "var(--color-text-subtle)", marginTop: 2, lineHeight: 1, letterSpacing: "0.05em" }}>
             AI INVESTIGATION
@@ -130,22 +120,7 @@ export function GlobalContextBar({ onSearchChange }: GlobalContextBarProps) {
           />
         </button>
 
-        {/* User Avatar */}
-        <button
-          style={{
-            width: 32, height: 32, borderRadius: "50%", cursor: "pointer",
-            background: "linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)",
-            border: "2px solid var(--color-border-bright)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: "white", fontSize: "0.75rem", fontWeight: 700,
-            transition: "border-color 0.15s",
-          }}
-          aria-label="User profile"
-          onMouseEnter={e => (e.currentTarget.style.borderColor = "var(--color-accent)")}
-          onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--color-border-bright)")}
-        >
-          KP
-        </button>
+
       </div>
     </header>
   );

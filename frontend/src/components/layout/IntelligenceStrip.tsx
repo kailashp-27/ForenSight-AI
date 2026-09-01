@@ -1,13 +1,14 @@
 // frontend/src/components/layout/IntelligenceStrip.tsx
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   ChevronUp, ChevronDown, Zap, Brain, AlertCircle,
   Clock, TrendingUp, User, Monitor, Globe, CheckCircle,
 } from "lucide-react";
 import { ContextPanel, type ContextPanelItem } from "./ContextPanel";
+import { getSocket } from "../../services/socket";
 
 /* ── Mock Data ────────────────────────────────────────────────────────────── */
-const MOCK_LEADS: ContextPanelItem[] = [
+const INITIAL_LEADS: ContextPanelItem[] = [
   {
     id: "L001",
     title: "Unusual login pattern — User KP-2234",
@@ -129,26 +130,28 @@ const RISK_CONFIG = {
   low:    { color: "#10b981", bg: "rgba(16,185,129,0.1)", label: "LOW" },
 };
 
-function LeadsTab({ onSelect }: { onSelect: (item: ContextPanelItem) => void }) {
+function LeadsTab({ leads, onSelect }: { leads: ContextPanelItem[], onSelect: (item: ContextPanelItem, list: ContextPanelItem[]) => void }) {
   return (
     <div
       style={{
         display: "grid",
         gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+        alignItems: "start",
+        alignContent: "start",
         gap: "0.625rem",
         padding: "0.75rem 1rem",
         overflowY: "auto",
         flex: 1,
       }}
     >
-      {MOCK_LEADS.map((lead) => (
+      {leads.map((lead) => (
         <div
           key={lead.id}
           className={`lead-card risk-${lead.risk}`}
-          onClick={() => onSelect(lead)}
+          onClick={() => onSelect(lead, leads)}
           role="button"
           tabIndex={0}
-          onKeyDown={(e) => e.key === "Enter" && onSelect(lead)}
+          onKeyDown={(e) => e.key === "Enter" && onSelect(lead, leads)}
           aria-label={`Open lead: ${lead.title}`}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
@@ -210,36 +213,51 @@ function LeadsTab({ onSelect }: { onSelect: (item: ContextPanelItem) => void }) 
   );
 }
 
-function HypothesesTab() {
+function HypothesesTab({ onSelect }: { onSelect: (item: ContextPanelItem, list: ContextPanelItem[]) => void }) {
   const STATUS_COLOR: Record<string, string> = { exploring: "#3b82f6", validated: "#10b981", rejected: "#6b7280" };
+  
+  const mappedHypotheses: ContextPanelItem[] = MOCK_HYPOTHESES.map(h => ({
+    id: h.id,
+    title: h.text,
+    type: "hypothesis",
+    confidence: h.confidence,
+    details: {
+      "Status": h.status,
+      "Evidence Count": h.evidence.toString(),
+    }
+  }));
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0.75rem 1rem", overflowY: "auto", flex: 1 }}>
-      {MOCK_HYPOTHESES.map((h) => (
+      {mappedHypotheses.map((h, i) => (
         <div
           key={h.id}
+          className="tab-card-hoverable"
           style={{
             background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)",
             borderRadius: 8, padding: "0.625rem 0.875rem",
             display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: 12,
+            cursor: "pointer", transition: "border-color 0.15s, background 0.15s",
           }}
+          onClick={() => onSelect(h, mappedHypotheses)}
         >
           <div>
             <p style={{ fontSize: "0.78rem", color: "var(--color-text-primary)", lineHeight: 1.4 }}>
-              {h.text}
+              {h.title}
             </p>
             <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
               <span style={{ fontSize: "0.65rem", color: "var(--color-text-muted)" }}>
-                {h.evidence} evidence
+                {h.details!["Evidence Count"]} evidence
               </span>
               <span style={{ width: 3, height: 3, borderRadius: "50%", background: "var(--color-text-subtle)" }} />
               <span
                 style={{
                   fontSize: "0.65rem", fontWeight: 600,
-                  color: STATUS_COLOR[h.status] ?? "var(--color-text-muted)",
+                  color: STATUS_COLOR[h.details!["Status"]] ?? "var(--color-text-muted)",
                   textTransform: "capitalize",
                 }}
               >
-                {h.status}
+                {h.details!["Status"]}
               </span>
             </div>
           </div>
@@ -247,7 +265,7 @@ function HypothesesTab() {
             <span
               style={{
                 fontSize: "0.875rem", fontWeight: 700, fontFamily: "monospace",
-                color: h.confidence >= 70 ? "#f59e0b" : "var(--color-text-muted)",
+                color: (h.confidence ?? 0) >= 70 ? "#f59e0b" : "var(--color-text-muted)",
               }}
             >
               {h.confidence}%
@@ -337,16 +355,80 @@ function ActivityTab() {
 /* ── Main Component ──────────────────────────────────────────────────────── */
 interface IntelligenceStripProps {
   contextItem: ContextPanelItem | null;
-  onContextSelect: (item: ContextPanelItem) => void;
+  onContextSelect: (item: ContextPanelItem, list: ContextPanelItem[]) => void;
   onContextClose: () => void;
 }
 
 export function IntelligenceStrip({ contextItem, onContextSelect, onContextClose }: IntelligenceStripProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("leads");
+  const [leads, setLeads] = useState<ContextPanelItem[]>(INITIAL_LEADS);
+  
+  useEffect(() => {
+    const socket = getSocket();
+    const handleNewLead = (newLead: any) => {
+      setLeads((prev) => [newLead, ...prev]);
+    };
+    socket.on("intelligence:new_lead", handleNewLead);
+    return () => {
+      socket.off("intelligence:new_lead", handleNewLead);
+    };
+  }, []);
+
+  const [height, setHeight] = useState(250);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartY = useRef(0);
+  const dragStartHeight = useRef(0);
+  const isMoved = useRef(false);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    isMoved.current = false;
+    dragStartY.current = e.clientY;
+    dragStartHeight.current = height;
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaY = dragStartY.current - e.clientY;
+      if (Math.abs(deltaY) > 5) {
+        isMoved.current = true;
+      }
+      
+      if (isMoved.current) {
+        setCollapsed(false);
+        const newHeight = Math.max(200, Math.min(800, dragStartHeight.current + deltaY));
+        setHeight(newHeight);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      if (!isMoved.current) {
+        setCollapsed(v => !v);
+      }
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDragging]);
+
+  // Auto-collapse when an item is selected
+  useEffect(() => {
+    if (contextItem) {
+      setCollapsed(true);
+    }
+  }, [contextItem]);
 
   const TABS: { key: Tab; label: string; count?: number; icon: React.ReactNode }[] = [
-    { key: "leads",       label: "Leads",           count: MOCK_LEADS.length,       icon: <Zap style={{ width: 11, height: 11 }} /> },
+    { key: "leads",       label: "Leads",           count: leads.length,       icon: <Zap style={{ width: 11, height: 11 }} /> },
     { key: "hypotheses",  label: "Hypotheses",      count: MOCK_HYPOTHESES.length,  icon: <Brain style={{ width: 11, height: 11 }} /> },
     { key: "gaps",        label: "Gaps",            count: MOCK_GAPS.length,        icon: <AlertCircle style={{ width: 11, height: 11 }} /> },
     { key: "activity",    label: "Recent Activity", count: MOCK_ACTIVITY.length,    icon: <Clock style={{ width: 11, height: 11 }} /> },
@@ -357,16 +439,20 @@ export function IntelligenceStrip({ contextItem, onContextSelect, onContextClose
       className={`hub-strip ${collapsed ? "collapsed" : ""}`}
       aria-label="Intelligence strip"
       role="region"
+      style={{
+        height: collapsed ? undefined : height,
+        transition: isDragging ? "none" : "height 0.3s ease",
+      }}
     >
       {/* Drag handle / collapse toggle */}
       <div
         className="strip-handle"
-        onClick={() => setCollapsed((v) => !v)}
+        onMouseDown={handleMouseDown}
         role="button"
         tabIndex={0}
         onKeyDown={(e) => e.key === "Enter" && setCollapsed((v) => !v)}
         aria-label={collapsed ? "Expand intelligence strip" : "Collapse intelligence strip"}
-        style={{ cursor: "pointer" }}
+        style={{ cursor: "ns-resize" }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
           <div className="strip-handle-bar" />
@@ -419,8 +505,8 @@ export function IntelligenceStrip({ contextItem, onContextSelect, onContextClose
 
           {/* Tab Content */}
           <div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
-            {activeTab === "leads"      && <LeadsTab onSelect={onContextSelect} />}
-            {activeTab === "hypotheses" && <HypothesesTab />}
+            {activeTab === "leads"      && <LeadsTab leads={leads} onSelect={onContextSelect} />}
+            {activeTab === "hypotheses" && <HypothesesTab onSelect={onContextSelect} />}
             {activeTab === "gaps"       && <GapsTab />}
             {activeTab === "activity"   && <ActivityTab />}
           </div>

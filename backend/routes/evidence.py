@@ -17,10 +17,11 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException, BackgroundTasks, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 
 from backend.config import settings
 from backend.database.db import get_db, write_audit_log
+from backend.modules.whisper_processor import run_whisper_extraction
 
 router = APIRouter()
 
@@ -68,20 +69,33 @@ async def _process_evidence(evidence_id: str, file_path: str, file_type: str, si
         })
 
         # TODO Phase 1: await run_yolov8_detection(evidence_id, file_path)
-        # TODO Phase 2: await run_extraction(evidence_id, file_path, file_type)
+        
+        # Phase 2: Whisper Transcription for Audio/Video
+        if file_type in ("AUDIO", "VIDEO"):
+            await sio.emit("evidence:status_update", {
+                "evidence_id": evidence_id,
+                "status": "PROCESSING",
+                "progress": 30,
+                "message": "Running Whisper transcription...",
+            })
+            try:
+                await run_whisper_extraction(evidence_id, file_path)
+            except Exception as e:
+                # Log but do not fail the whole process if transcription fails
+                print(f"Whisper transcription failed: {e}")
 
-        # Simulate completion (remove when real processing is added)
+        # Finalize processing
         await db.execute(
-            "UPDATE evidence SET status = 'PENDING', processed_at = %s WHERE id = %s",
+            "UPDATE evidence SET status = 'COMPLETED', processed_at = %s WHERE id = %s",
             (datetime.utcnow().isoformat(), evidence_id),
         )
         await db.commit()
 
         await sio.emit("evidence:status_update", {
             "evidence_id": evidence_id,
-            "status": "PENDING",
+            "status": "COMPLETED",
             "progress": 100,
-            "message": "Awaiting AI analysis (Phase 1).",
+            "message": "AI analysis complete.",
         })
     except Exception as e:
         await db.execute(
@@ -195,6 +209,12 @@ async def get_evidence(evidence_id: str):
             (evidence_id,),
         )
         ev["detections"] = [dict(r) for r in await det_cursor.fetchall()]
+
+        chunk_cursor = await db.execute(
+            "SELECT * FROM text_chunks WHERE evidence_id = %s ORDER BY chunk_index",
+            (evidence_id,),
+        )
+        ev["textChunks"] = [dict(r) for r in await chunk_cursor.fetchall()]
     finally:
         await db.close()
 
@@ -228,3 +248,22 @@ async def delete_evidence(evidence_id: str, request: Request):
         metadata={"evidence_id": evidence_id},
         ip_address=request.client.host if request.client else None,
     )
+
+
+@router.get("/media/{evidence_id}")
+async def stream_media(evidence_id: str):
+    db = await get_db()
+    try:
+        row = await db.execute("SELECT file_path, mime_type FROM evidence WHERE id = %s", (evidence_id,))
+        ev = await row.fetchone()
+        if not ev:
+            raise HTTPException(status_code=404, detail="Media not found")
+        
+        file_path = Path(ev["file_path"])
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="File missing from storage")
+            
+        return FileResponse(file_path, media_type=ev["mime_type"], headers={"Accept-Ranges": "bytes"})
+    finally:
+        await db.close()
+

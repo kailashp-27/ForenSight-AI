@@ -7,12 +7,12 @@ import {
 } from "lucide-react";
 
 const NAV_ITEMS = [
-  { to: "/",         icon: LayoutDashboard, label: "Dashboard",   angle: -90 },
-  { to: "/cases",    icon: FolderOpen,      label: "Cases",       angle: -45 },
-  { to: "/evidence", icon: FileVideo,       label: "Evidence",    angle: 0   },
-  { to: "/reports",  icon: BarChart2,       label: "Reports",     angle: 45  },
-  { to: "/settings", icon: Settings,        label: "Settings",    angle: 90  },
-  { to: "/help",     icon: HelpCircle,      label: "Help",        angle: 135 },
+  { to: "/",         icon: LayoutDashboard, label: "Dashboard" },
+  { to: "/cases",    icon: FolderOpen,      label: "Cases" },
+  { to: "/evidence", icon: FileVideo,       label: "Evidence" },
+  { to: "/reports",  icon: BarChart2,       label: "Reports" },
+  { to: "/settings", icon: Settings,        label: "Settings" },
+  { to: "/help",     icon: HelpCircle,      label: "Help" },
 ];
 
 const RADIUS = 68; // px from orb center to menu item center
@@ -50,56 +50,38 @@ export function FloatingActionOrb() {
       ref={orbRef}
       style={{
         position: "fixed",
-        bottom: "calc(var(--strip-h) + 24px)",
-        left: 24,
-        zIndex: 30,
+        bottom: 32,
+        right: 32,
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 48,
+        height: 48,
       }}
       aria-label="Navigation menu"
     >
-      {/* Radial menu items */}
-      {NAV_ITEMS.map(({ to, icon: Icon, label, angle }, i) => {
-        const rad = (angle * Math.PI) / 180;
-        const x = Math.cos(rad) * RADIUS;
-        const y = Math.sin(rad) * RADIUS;
+      {/* Menu items (Vertical List) */}
+      {NAV_ITEMS.map(({ to, icon: Icon, label }, i) => {
+        // Calculate vertical offset
+        const yOffset = (i + 1) * 56;
         const isCurrentActive =
           to === "/" ? location.pathname === "/" : location.pathname.startsWith(to);
 
         return (
-          <div key={to} style={{ position: "absolute", bottom: 0, left: 0 }}>
-            {/* Tooltip */}
-            {tooltip === label && open && (
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: y + 24 + 4,
-                  left: x + 24,
-                  transform: "translateX(-50%) translateY(-100%)",
-                  background: "var(--color-bg-elevated)",
-                  border: "1px solid var(--color-border-bright)",
-                  borderRadius: 6,
-                  padding: "3px 8px",
-                  fontSize: "0.6875rem",
-                  fontWeight: 500,
-                  color: "var(--color-text-primary)",
-                  whiteSpace: "nowrap",
-                  pointerEvents: "none",
-                  boxShadow: "var(--shadow-elevated)",
-                }}
-              >
-                {label}
-              </div>
-            )}
+          <div key={to} style={{ position: "absolute", bottom: 0, left: 0, width: "100%", height: "100%" }}>
             <NavLink
               to={to}
               end={to === "/"}
               className="fab-item"
               aria-label={label}
               style={{
-                bottom: 0,
-                left: 0,
+                position: "absolute",
+                bottom: 4,
+                left: 4, // 48/2 - 40/2 = 4 to center a 40px item inside a 48px orb container
                 transform: open
-                  ? `translate(${x}px, ${-y}px) scale(1)`
-                  : `translate(0px, 0px) scale(0)`,
+                  ? `translateY(-${yOffset}px) scale(1)`
+                  : `translateY(0px) scale(0)`,
                 opacity: open ? 1 : 0,
                 transition: `transform 0.25s cubic-bezier(0.34,1.56,0.64,1) ${i * 35}ms, opacity 0.2s ease ${i * 30}ms`,
                 pointerEvents: open ? "auto" : "none",
@@ -107,20 +89,39 @@ export function FloatingActionOrb() {
               onMouseEnter={() => setTooltip(label)}
               onMouseLeave={() => setTooltip(null)}
             >
-              {({ isActive }) => (
-                <span
-                  className={isActive || isCurrentActive ? "active" : ""}
-                  style={{ display: "contents" }}
+              {/* Tooltip */}
+              {tooltip === label && open && (
+                <div
+                  style={{
+                    position: "absolute",
+                    right: "100%",
+                    top: "50%",
+                    marginRight: 12,
+                    transform: "translateY(-50%)",
+                    background: "var(--color-bg-elevated)",
+                    border: "1px solid var(--color-border-bright)",
+                    borderRadius: 6,
+                    padding: "4px 10px",
+                    fontSize: "0.75rem",
+                    fontWeight: 500,
+                    color: "var(--color-text-primary)",
+                    whiteSpace: "nowrap",
+                    pointerEvents: "none",
+                    boxShadow: "var(--shadow-elevated)",
+                  }}
                 >
-                  <Icon
-                    style={{
-                      width: 16, height: 16,
-                      color: isActive || isCurrentActive ? "white" : undefined,
-                    }}
-                    aria-hidden="true"
-                  />
-                </span>
+                  {label}
+                </div>
               )}
+              
+              {/* Icon */}
+              <Icon
+                style={{
+                  width: 16, height: 16,
+                  color: isCurrentActive ? "white" : undefined,
+                }}
+                aria-hidden="true"
+              />
             </NavLink>
           </div>
         );

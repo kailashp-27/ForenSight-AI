@@ -71,21 +71,23 @@ enum CaseStatus {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Evidence {
-  id            String         @id @default(uuid())
-  fileName      String         @map("file_name")
-  fileType      EvidenceType
-  filePath      String         @map("file_path")   // Local storage path
-  fileSize      Int            @map("file_size")   // Bytes
-  mimeType      String         @map("mime_type")
-  status        ProcessStatus  @default(PENDING)
-  uploadedAt    DateTime       @default(now()) @map("uploaded_at")
-  processedAt   DateTime?      @map("processed_at")
+  id                  String         @id @default(uuid())
+  fileName            String         @map("file_name")
+  fileType            EvidenceType
+  filePath            String         @map("file_path")   // Local storage path
+  fileSize            Int            @map("file_size")   // Bytes
+  mimeType            String         @map("mime_type")
+  status              ProcessStatus  @default(PENDING)
+  transcript          String?        @db.LongText
+  transcriptionStatus TranscriptionStatus @default(NOT_APPLICABLE) @map("transcription_status")
+  uploadedAt          DateTime       @default(now()) @map("uploaded_at")
+  processedAt         DateTime?      @map("processed_at")
 
   // Relations
-  case          Case           @relation(fields: [caseId], references: [id])
-  caseId        String         @map("case_id")
-  detections    Detection[]
-  textChunks    TextChunk[]
+  case                Case           @relation(fields: [caseId], references: [id])
+  caseId              String         @map("case_id")
+  detections          Detection[]
+  textChunks          TextChunk[]
 
   @@map("evidence")
 }
@@ -103,6 +105,14 @@ enum ProcessStatus {
   PROCESSING
   COMPLETED
   FAILED
+}
+
+enum TranscriptionStatus {
+  PENDING_TRANSCRIPTION
+  TRANSCRIBING
+  TRANSCRIBED
+  FAILED
+  NOT_APPLICABLE
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

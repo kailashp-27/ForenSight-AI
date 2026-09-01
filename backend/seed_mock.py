@@ -41,17 +41,18 @@ def _parse_db():
 CASE_ID     = _make_id()
 CASE_NUMBER = "CASE-2026-001"
 
+USER_ID = _make_id()
+
 CASE = {
     "id":               CASE_ID,
     "case_number":      CASE_NUMBER,
     "title":            "Downtown Fraud Investigation — Aug 2026",
     "description": (
         "Multi-layered fraud investigation involving suspected account takeover, "
-        "structured cash transactions (smurfing), and a CCTV incident at Lobby B. "
-        "Involves cross-analysis of financial records, CCTV footage, and audio interviews."
+        "structured cash transactions, and a CCTV incident at Lobby B."
     ),
     "status":           "UNDER_REVIEW",
-    "created_by_name":  "Kailash P",
+    "created_by_id":    USER_ID,
 }
 
 # ── Demo evidence files ───────────────────────────────────────────────────────
@@ -176,16 +177,26 @@ async def seed():
                 await pool.wait_closed()
                 return
 
+            # Insert User
+            await cur.execute("SELECT id FROM users WHERE id = %s", (USER_ID,))
+            if not await cur.fetchone():
+                await cur.execute(
+                    """INSERT INTO users (id, email, display_name, role, updated_at)
+                       VALUES (%s, 'demo@example.com', 'Kailash P', 'INVESTIGATOR', %s)""",
+                    (USER_ID, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
+                )
+
             # Insert case
             await cur.execute(
-                """INSERT INTO cases (id, case_number, title, description, status, created_by_name)
-                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                """INSERT INTO cases (id, case_number, title, description, status, created_by_name, updated_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                 (
                     CASE["id"], CASE["case_number"], CASE["title"],
-                    CASE["description"], CASE["status"], CASE["created_by_name"],
+                    CASE["description"], CASE["status"], "Kailash P",
+                    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                 ),
             )
-            print(f"[Seed] ✓ Case inserted: {CASE_NUMBER}")
+            print(f"[Seed] OK Case inserted: {CASE_NUMBER}")
 
             # Insert evidence
             for ev in EVIDENCE:
@@ -200,7 +211,7 @@ async def seed():
                         ev["status"], ev["uploaded_at"], ev.get("processed_at"),
                     ),
                 )
-                print(f"[Seed]   ✓ Evidence: {ev['file_name']} ({ev['status']})")
+                print(f"[Seed]   OK Evidence: {ev['file_name']} ({ev['status']})")
 
             # Insert YOLOv8 detections
             for det in DETECTIONS:
@@ -215,7 +226,7 @@ async def seed():
                         det["frame_timestamp"], det.get("grad_cam_path"),
                     ),
                 )
-                print(f"[Seed]   ✓ Detection: {det['label']} @ {det['confidence']*100:.1f}%")
+                print(f"[Seed]   OK Detection: {det['label']} @ {det['confidence']*100:.1f}%")
 
             # Insert audit logs
             for log in AUDIT_LOGS:
@@ -224,13 +235,13 @@ async def seed():
                        VALUES (%s, %s, %s, %s, %s)""",
                     (log["id"], log["action"], log["case_id"], log["metadata"], log.get("ip_address")),
                 )
-            print(f"[Seed]   ✓ Audit logs: {len(AUDIT_LOGS)} entries")
+            print(f"[Seed]   OK Audit logs: {len(AUDIT_LOGS)} entries")
 
             await conn.commit()
 
     pool.close()
     await pool.wait_closed()
-    print(f"\n[Seed] ✅ Done! Case '{CASE_NUMBER}' is in the database.")
+    print(f"\n[Seed] Done! Case '{CASE_NUMBER}' is in the database.")
     print(f"[Seed]    Open the app and navigate to Cases → {CASE_NUMBER}")
 
 

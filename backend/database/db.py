@@ -65,6 +65,8 @@ CREATE_TABLES_SQL = [
         status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
         uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         processed_at TIMESTAMP NULL,
+        transcription_status VARCHAR(50) DEFAULT 'PENDING',
+        transcript TEXT,
         FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE
     );
     """,
@@ -142,7 +144,11 @@ class _DBContextManager:
         
     async def close(self):
         await self.cursor.close()
-        self.conn.close()
+        global _pool
+        if _pool:
+            _pool.release(self.conn)
+        else:
+            self.conn.close()
 
 
 async def get_db():

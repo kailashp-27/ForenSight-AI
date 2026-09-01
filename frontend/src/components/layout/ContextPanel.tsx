@@ -9,9 +9,9 @@ export interface ContextPanelItem {
   id: string;
   title: string;
   subtitle?: string;
-  type: "lead" | "event" | "entity" | "evidence";
+  type: "lead" | "event" | "entity" | "evidence" | "hypothesis" | "gap" | "activity";
   confidence?: number;
-  risk?: "high" | "medium" | "low";
+  risk?: "high" | "medium" | "low" | string;
   aiReasoning?: string;
   details?: Record<string, string>;
   relatedItems?: Array<{ label: string; value: string }>;
@@ -21,6 +21,10 @@ export interface ContextPanelItem {
 interface ContextPanelProps {
   item: ContextPanelItem | null;
   onClose: () => void;
+  onNext?: () => void;
+  onPrev?: () => void;
+  hasNext?: boolean;
+  hasPrev?: boolean;
 }
 
 const RISK_COLOR: Record<string, string> = {
@@ -52,7 +56,7 @@ function ConfidenceBar({ value }: { value: number }) {
   );
 }
 
-export function ContextPanel({ item, onClose }: ContextPanelProps) {
+export function ContextPanel({ item, onClose, onNext, onPrev, hasNext, hasPrev }: ContextPanelProps) {
   if (!item) return null;
 
   return (
@@ -113,21 +117,61 @@ export function ContextPanel({ item, onClose }: ContextPanelProps) {
             </div>
           )}
         </div>
-        <button
-          onClick={onClose}
-          style={{
-            width: 28, height: 28, borderRadius: 6, flexShrink: 0,
-            background: "transparent", border: "1px solid var(--color-border)",
-            color: "var(--color-text-muted)", cursor: "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            transition: "background 0.15s, color 0.15s",
-          }}
-          aria-label="Close context panel"
-          onMouseEnter={e => { e.currentTarget.style.background = "var(--color-bg-elevated)"; e.currentTarget.style.color = "var(--color-text-primary)"; }}
-          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--color-text-muted)"; }}
-        >
-          <X style={{ width: 14, height: 14 }} />
-        </button>
+        <div style={{ display: "flex", gap: "0.25rem", alignItems: "center" }}>
+          {(onPrev || onNext) && (
+            <div style={{ display: "flex", background: "var(--color-bg-elevated)", borderRadius: 6, border: "1px solid var(--color-border)", overflow: "hidden" }}>
+              <button
+                onClick={onPrev}
+                disabled={!hasPrev}
+                style={{
+                  width: 28, height: 28, flexShrink: 0,
+                  background: "transparent", border: "none", borderRight: "1px solid var(--color-border)",
+                  color: hasPrev ? "var(--color-text-muted)" : "var(--color-border-bright)", 
+                  cursor: hasPrev ? "pointer" : "default",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "background 0.15s, color 0.15s",
+                }}
+                aria-label="Previous item"
+                onMouseEnter={e => hasPrev && (e.currentTarget.style.background = "var(--color-bg-card-hover)")}
+                onMouseLeave={e => hasPrev && (e.currentTarget.style.background = "transparent")}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+              </button>
+              <button
+                onClick={onNext}
+                disabled={!hasNext}
+                style={{
+                  width: 28, height: 28, flexShrink: 0,
+                  background: "transparent", border: "none",
+                  color: hasNext ? "var(--color-text-muted)" : "var(--color-border-bright)", 
+                  cursor: hasNext ? "pointer" : "default",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "background 0.15s, color 0.15s",
+                }}
+                aria-label="Next item"
+                onMouseEnter={e => hasNext && (e.currentTarget.style.background = "var(--color-bg-card-hover)")}
+                onMouseLeave={e => hasNext && (e.currentTarget.style.background = "transparent")}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              </button>
+            </div>
+          )}
+          <button
+            onClick={onClose}
+            style={{
+              width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+              background: "transparent", border: "1px solid var(--color-border)",
+              color: "var(--color-text-muted)", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              transition: "background 0.15s, color 0.15s",
+            }}
+            aria-label="Close context panel"
+            onMouseEnter={e => { e.currentTarget.style.background = "var(--color-bg-elevated)"; e.currentTarget.style.color = "var(--color-text-primary)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--color-text-muted)"; }}
+          >
+            <X style={{ width: 14, height: 14 }} />
+          </button>
+        </div>
       </div>
 
       {/* Confidence */}
