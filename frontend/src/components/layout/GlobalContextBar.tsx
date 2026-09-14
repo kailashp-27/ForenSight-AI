@@ -1,6 +1,7 @@
 // frontend/src/components/layout/GlobalContextBar.tsx
 import React, { useState } from "react";
 import { Search, Shield, Briefcase, Bell, User, Wifi, WifiOff } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useSocketStore } from "../../store/socketStore";
 
 interface GlobalContextBarProps {
@@ -20,14 +21,14 @@ export function GlobalContextBar({ onSearchChange }: GlobalContextBarProps) {
     <header className="hub-header" role="banner">
       {/* Logo */}
       <div className="flex items-center gap-2.5 flex-shrink-0">
-        <div>
+        <Link to="/" style={{ textDecoration: "none", outline: "none" }}>
           <p style={{ fontSize: "0.875rem", fontWeight: 700, color: "var(--color-text-primary)", lineHeight: 1 }}>
             ForenSight AI
           </p>
           <p style={{ fontSize: "0.65rem", color: "var(--color-text-subtle)", marginTop: 2, lineHeight: 1, letterSpacing: "0.05em" }}>
             AI INVESTIGATION
           </p>
-        </div>
+        </Link>
       </div>
 
       {/* Divider */}
@@ -59,43 +60,6 @@ export function GlobalContextBar({ onSearchChange }: GlobalContextBarProps) {
 
       {/* Right controls */}
       <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexShrink: 0 }}>
-        {/* Workspace */}
-        <button
-          style={{
-            display: "flex", alignItems: "center", gap: "0.4rem",
-            padding: "0.35rem 0.75rem", borderRadius: 6,
-            background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)",
-            color: "var(--color-text-body)", fontSize: "0.75rem", fontWeight: 500,
-            cursor: "pointer", transition: "border-color 0.15s",
-          }}
-          aria-label="Switch workspace"
-          onMouseEnter={e => (e.currentTarget.style.borderColor = "var(--color-border-bright)")}
-          onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--color-border)")}
-        >
-          <Briefcase style={{ width: 12, height: 12, color: "var(--color-text-muted)" }} />
-          Fraud Investigations
-        </button>
-
-        {/* Live connection */}
-        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-          <div className="live-dot">
-            {connected && (
-              <span
-                className="live-dot-ping"
-                style={{ background: "rgba(16,185,129,0.5)" }}
-              />
-            )}
-            <span
-              className="live-dot-core"
-              style={{ background: connected ? "#10b981" : "#374151" }}
-            />
-          </div>
-          {connected
-            ? <Wifi style={{ width: 12, height: 12, color: "#10b981" }} aria-label="Connected" />
-            : <WifiOff style={{ width: 12, height: 12, color: "var(--color-text-subtle)" }} aria-label="Disconnected" />
-          }
-        </div>
-
         {/* Notifications */}
         <button
           style={{

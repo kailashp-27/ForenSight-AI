@@ -3,6 +3,19 @@
 
 const BASE = "/api";
 
+// ── Timeline Event (shared type) ────────────────────────────────────────────
+export interface TimelineEvent {
+  id: string;
+  label: string;
+  type: "login" | "transaction" | "detection" | "document" | "alert";
+  time: string;
+  timestamp: number; // 0–100 relative position
+  entity?: string;
+  entityType?: "person" | "device" | "account" | "network";
+  risk?: "high" | "medium" | "low" | null;
+  description?: string;
+}
+
 async function request<T>(
   path: string,
   options?: RequestInit
@@ -49,6 +62,7 @@ export const casesApi = {
   update: (id: string, payload: Partial<Case>) =>
     request<Case>(`/cases/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   delete: (id: string) => request<void>(`/cases/${id}`, { method: "DELETE" }),
+  getTimeline: (id: string) => request<TimelineEvent[]>(`/cases/${id}/timeline`),
 };
 
 // ── Evidence ─────────────────────────────────────────────────────────────────
@@ -65,6 +79,8 @@ export interface Evidence {
   uploaded_at: string;
   processed_at?: string;
   detections?: Detection[];
+  case_title?: string;
+  case_number?: string;
 }
 
 export interface Detection {
@@ -79,6 +95,7 @@ export interface Detection {
 }
 
 export const evidenceApi = {
+  listAll: () => request<Evidence[]>("/evidence"),
   get: (id: string) => request<Evidence>(`/evidence/${id}`),
   upload: (formData: FormData) =>
     fetch(`${BASE}/evidence/upload`, { method: "POST", body: formData }).then(

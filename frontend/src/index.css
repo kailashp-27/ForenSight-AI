@@ -106,6 +106,12 @@ code, .font-mono {
 ::-webkit-scrollbar-thumb { background: #1e2d45; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #2a3f5f; }
 
+/* Timeline horizontal scroller — more visible scrollbar */
+.timeline-scroll-container::-webkit-scrollbar { height: 6px; }
+.timeline-scroll-container::-webkit-scrollbar-track { background: var(--color-bg-elevated); border-radius: 3px; }
+.timeline-scroll-container::-webkit-scrollbar-thumb { background: var(--color-accent); border-radius: 3px; opacity: 0.7; }
+.timeline-scroll-container::-webkit-scrollbar-thumb:hover { background: var(--color-accent-hover); }
+
 /* ── Investigation Hub Layout ───────────────────────────────────────────────── */
 .hub-shell {
   display: flex;
@@ -511,10 +517,65 @@ textarea.input-dark {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 1rem;
-  background: rgba(245, 158, 11, 0.08);
-  border-bottom: 1px solid rgba(245, 158, 11, 0.2);
+  background: var(--color-accent-light);
+  border-bottom: 1px solid rgba(168, 85, 247, 0.2);
   font-size: 0.7rem;
-  color: #f59e0b;
+  color: var(--color-accent);
+}
+
+.glass-header h1 { margin: 0; font-size: 1.25rem; font-weight: 600; }
+.glass-header p { margin: 4px 0 0; font-size: 0.8125rem; color: var(--color-text-subtle); }
+
+/* ── Markdown Content Styling ─────────────────────────────────────────────── */
+.markdown-content h1, 
+.markdown-content h2, 
+.markdown-content h3 {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+
+.markdown-content h1 { font-size: 1.2rem; }
+.markdown-content h2 { font-size: 1.1rem; }
+.markdown-content h3 { font-size: 1rem; }
+
+.markdown-content p {
+  margin-bottom: 1em;
+}
+
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content strong {
+  color: var(--color-text-primary);
+  font-weight: 700;
+}
+
+.markdown-content ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin-bottom: 1em;
+}
+
+.markdown-content ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin-bottom: 1em;
+}
+
+.markdown-content li {
+  margin-bottom: 0.25em;
+}
+
+.markdown-content code {
+  background: var(--color-bg-canvas);
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-family: 'Geist Mono', monospace;
+  font-size: 0.9em;
+  color: var(--color-accent);
 }
 
 /* ── Table ──────────────────────────────────────────────────────────────────── */

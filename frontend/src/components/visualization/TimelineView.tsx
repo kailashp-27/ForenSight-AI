@@ -1,28 +1,9 @@
 // frontend/src/components/visualization/TimelineView.tsx
 import React, { useRef, useState } from "react";
-import { User, Monitor, Globe, AlertTriangle, FileText } from "lucide-react";
+import { User, Monitor, Globe, FileText } from "lucide-react";
+import type { TimelineEvent } from "../../services/api";
 
-export interface TimelineEvent {
-  id: string;
-  label: string;
-  type: "login" | "transaction" | "detection" | "document" | "alert";
-  time: string;
-  timestamp: number; // 0–100 position %
-  entity?: string;
-  entityType?: "person" | "device" | "account" | "network";
-  risk?: "high" | "medium" | "low";
-  description?: string;
-}
-
-const MOCK_EVENTS: TimelineEvent[] = [
-  { id: "E01", label: "Login surge", type: "login",       time: "00:12", timestamp: 5,  entity: "KP-2234",     entityType: "person",  risk: "high",   description: "23 logins in 4h from 7 IPs" },
-  { id: "E02", label: "VPN detected", type: "alert",      time: "01:08", timestamp: 18, entity: "IP-45.32.x",  entityType: "network", risk: "high",   description: "Known VPN exit node" },
-  { id: "E03", label: "CCTV object", type: "detection",   time: "02:14", timestamp: 30, entity: "CAM-LOBBY",   entityType: "device",  risk: "high",   description: "YOLOv8: possible firearm — 78%" },
-  { id: "E04", label: "Tx cluster", type: "transaction",  time: "03:41", timestamp: 46, entity: "ACC-887",     entityType: "account", risk: "high",   description: "14 split transactions ₹4.7L" },
-  { id: "E05", label: "Doc upload", type: "document",     time: "06:22", timestamp: 60, entity: "Analyst KP",  entityType: "person",  risk: "low",    description: "Bank statement uploaded" },
-  { id: "E06", label: "Behavioral match", type: "alert",  time: "08:15", timestamp: 72, entity: "DEV-4420",    entityType: "device",  risk: "medium", description: "5 accounts — 94% fingerprint similarity" },
-  { id: "E07", label: "RAG summary", type: "document",    time: "10:00", timestamp: 87, entity: "AI Engine",   entityType: "device",  risk: "low",    description: "Chronological timeline generated" },
-];
+export type { TimelineEvent };
 
 const TYPE_COLOR: Record<string, string> = {
   login:       "#3b82f6",
@@ -33,10 +14,10 @@ const TYPE_COLOR: Record<string, string> = {
 };
 
 const ENTITY_ICON: Record<string, React.FC<{ style?: React.CSSProperties }>> = {
-  person:  ({ style }) => <User   style={style} />,
+  person:  ({ style }) => <User    style={style} />,
   device:  ({ style }) => <Monitor style={style} />,
-  account: ({ style }) => <Globe  style={style} />,
-  network: ({ style }) => <Globe  style={style} />,
+  account: ({ style }) => <Globe   style={style} />,
+  network: ({ style }) => <Globe   style={style} />,
 };
 
 const ENTITY_COLOR: Record<string, string> = {
@@ -55,14 +36,14 @@ const RISK_GLOW: Record<string, string> = {
 interface TooltipState {
   event: TimelineEvent;
   x: number;
-  y: number;
 }
 
 interface TimelineViewProps {
+  events: TimelineEvent[];
   onEventClick?: (event: TimelineEvent) => void;
 }
 
-export function TimelineView({ onEventClick }: TimelineViewProps) {
+export function TimelineView({ events, onEventClick }: TimelineViewProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
@@ -74,19 +55,43 @@ export function TimelineView({ onEventClick }: TimelineViewProps) {
     onEventClick?.(ev);
   };
 
+  // Empty state
+  if (events.length === 0) {
+    return (
+      <div
+        style={{
+          display: "flex", flexDirection: "column", alignItems: "center",
+          justifyContent: "center", padding: "3rem 1rem", textAlign: "center", gap: 10,
+        }}
+      >
+        <FileText style={{ width: 36, height: 36, color: "var(--color-border-bright)" }} />
+        <p style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--color-text-muted)" }}>
+          No timeline events yet
+        </p>
+        <p style={{ fontSize: "0.75rem", color: "var(--color-text-subtle)", maxWidth: 300 }}>
+          Upload evidence and run AI analysis to start building the case storyline.
+        </p>
+      </div>
+    );
+  }
+
+  const topEvents    = events.filter((_, i) => i % 2 === 0);
+  const bottomEvents = events.filter((_, i) => i % 2 !== 0);
+
   return (
     <div
       style={{
         position: "relative",
         padding: "1.5rem 2rem",
         userSelect: "none",
+        minWidth: Math.max(900, events.length * 120),
       }}
       ref={containerRef}
       onClick={() => setSelectedId(null)}
     >
       {/* Time Labels row */}
       <div style={{ position: "relative", height: 20, marginBottom: 8 }}>
-        {MOCK_EVENTS.map((ev) => (
+        {events.map((ev) => (
           <span
             key={`label-${ev.id}`}
             style={{
@@ -106,7 +111,7 @@ export function TimelineView({ onEventClick }: TimelineViewProps) {
 
       {/* Top entities */}
       <div style={{ position: "relative", height: 48, marginBottom: 0 }}>
-        {MOCK_EVENTS.filter((_, i) => i % 2 === 0).map((ev) => {
+        {topEvents.map((ev) => {
           const IconComp = ENTITY_ICON[ev.entityType ?? "device"] ?? ENTITY_ICON.device;
           return (
             <div
@@ -147,7 +152,6 @@ export function TimelineView({ onEventClick }: TimelineViewProps) {
               >
                 {ev.entity}
               </span>
-              {/* Connector line to timeline */}
               <div style={{ width: 1, height: 8, background: "var(--color-border)" }} />
             </div>
           );
@@ -156,8 +160,7 @@ export function TimelineView({ onEventClick }: TimelineViewProps) {
 
       {/* Timeline track */}
       <div className="timeline-track" style={{ position: "relative", margin: "0 0" }}>
-        {/* Event nodes on the track */}
-        {MOCK_EVENTS.map((ev) => (
+        {events.map((ev) => (
           <div
             key={`node-${ev.id}`}
             className="timeline-node"
@@ -165,13 +168,13 @@ export function TimelineView({ onEventClick }: TimelineViewProps) {
               left: `${ev.timestamp}%`,
               background: TYPE_COLOR[ev.type] ?? "var(--color-accent)",
               borderColor: selectedId === ev.id ? "white" : "var(--color-bg-canvas)",
-              width: selectedId === ev.id ? 14 : hoveredId === ev.id ? 12 : 10,
+              width:  selectedId === ev.id ? 14 : hoveredId === ev.id ? 12 : 10,
               height: selectedId === ev.id ? 14 : hoveredId === ev.id ? 12 : 10,
-              boxShadow: ev.risk ? RISK_GLOW[ev.risk] : "none",
+              boxShadow: ev.risk ? (RISK_GLOW[ev.risk] ?? "none") : "none",
               zIndex: selectedId === ev.id ? 10 : 1,
             }}
             onClick={(e) => handleNodeClick(ev, e)}
-            onMouseEnter={() => { setHoveredId(ev.id); setTooltip({ event: ev, x: ev.timestamp, y: 0 }); }}
+            onMouseEnter={() => { setHoveredId(ev.id); setTooltip({ event: ev, x: ev.timestamp }); }}
             onMouseLeave={() => { setHoveredId(null); setTooltip(null); }}
             role="button"
             tabIndex={0}
@@ -181,9 +184,9 @@ export function TimelineView({ onEventClick }: TimelineViewProps) {
         ))}
       </div>
 
-      {/* Bottom entities + event pills */}
+      {/* Bottom entities */}
       <div style={{ position: "relative", marginTop: 0 }}>
-        {MOCK_EVENTS.filter((_, i) => i % 2 !== 0).map((ev) => {
+        {bottomEvents.map((ev) => {
           const IconComp = ENTITY_ICON[ev.entityType ?? "device"] ?? ENTITY_ICON.device;
           return (
             <div
@@ -225,9 +228,9 @@ export function TimelineView({ onEventClick }: TimelineViewProps) {
         })}
       </div>
 
-      {/* Event label pills below the bottom entities */}
-      <div style={{ position: "relative", marginTop: 52 }}>
-        {MOCK_EVENTS.map((ev, i) => (
+      {/* Event label pills */}
+      <div style={{ position: "relative", marginTop: 52, height: 80 }}>
+        {events.map((ev, i) => (
           <button
             key={`pill-${ev.id}`}
             className="timeline-event-pill"
@@ -289,6 +292,7 @@ export function TimelineView({ onEventClick }: TimelineViewProps) {
             }}
           >
             {tooltip.event.type}
+            {tooltip.event.risk && ` · ${tooltip.event.risk} risk`}
           </div>
         </div>
       )}

@@ -171,7 +171,7 @@ export function EvidenceUploadWizard({ caseId, onSuccess, onClose }: Props) {
   const STEP_LABELS = ["Type & File", "Chain of Custody", "Processing"];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, height: "100%" }}>
 
       {/* Step Indicator */}
       <div

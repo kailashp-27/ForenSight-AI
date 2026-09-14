@@ -1,19 +1,27 @@
 // frontend/src/pages/Dashboard.tsx
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   FolderOpen, FileVideo, Clock, ShieldAlert,
-  ChevronRight, Plus, TrendingUp, AlertTriangle,
+  ChevronRight, Plus, TrendingUp,
+  GitGraph, Map, CalendarDays,
 } from "lucide-react";
 import { Badge, statusToVariant } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { useCaseStore } from "../store/caseStore";
-import { TimelineView, type TimelineEvent } from "../components/visualization/TimelineView";
+import { casesApi, evidenceApi, type TimelineEvent, type Case } from "../services/api";
+import { TimelineView } from "../components/visualization/TimelineView";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", {
     day: "2-digit", month: "short", year: "numeric",
   });
+}
+
+/* ── Compute "added this week" ───────────────────────────────────────────── */
+function countAddedThisWeek(items: { created_at: string }[]): number {
+  const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  return items.filter((i) => new Date(i.created_at).getTime() > oneWeekAgo).length;
 }
 
 /* ── Stat card ─────────────────────────────────────────────────────────── */
@@ -67,28 +75,113 @@ function StatCard({
   );
 }
 
+/* ── Coming Soon Overlay ────────────────────────────────────────────────── */
+function ComingSoonPane({ label }: { label: string }) {
+  return (
+    <div
+      style={{
+        display: "flex", flexDirection: "column", alignItems: "center",
+        justifyContent: "center", padding: "4rem 1rem", textAlign: "center", gap: 12,
+      }}
+    >
+      <div
+        style={{
+          width: 48, height: 48, borderRadius: 12,
+          background: "var(--color-accent-light)", border: "1px solid var(--color-border-bright)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: "1.25rem",
+        }}
+      >
+        🚧
+      </div>
+      <p style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text-primary)" }}>
+        {label} View
+      </p>
+      <p style={{ fontSize: "0.78rem", color: "var(--color-text-muted)", maxWidth: 280 }}>
+        This view is coming in the next development phase. The Timeline is currently active.
+      </p>
+      <div
+        style={{
+          padding: "0.3rem 0.75rem", borderRadius: 6,
+          background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)",
+          fontSize: "0.7rem", fontFamily: "monospace", color: "var(--color-text-subtle)",
+        }}
+      >
+        Coming in next phase
+      </div>
+    </div>
+  );
+}
+
 /* ── Dashboard ─────────────────────────────────────────────────────────── */
 export function Dashboard() {
   const { cases, loading, fetchCases } = useCaseStore();
+  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"Timeline" | "Graph" | "Map">("Timeline");
+  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  
+  const [evidenceThisWeek, setEvidenceThisWeek] = useState<number | null>(null);
 
   useEffect(() => { fetchCases(); }, [fetchCases]);
+
+  // Auto-select first case when cases load
+  useEffect(() => {
+    if (cases.length > 0 && !selectedCaseId) {
+      setSelectedCaseId(cases[0].id);
+    }
+  }, [cases, selectedCaseId]);
+
+  // Fetch timeline when selected case changes
+  useEffect(() => {
+    if (!selectedCaseId) return;
+    setTimelineLoading(true);
+    setTimelineEvents([]);
+    casesApi.getTimeline(selectedCaseId)
+      .then(setTimelineEvents)
+      .catch(() => setTimelineEvents([]))
+      .finally(() => setTimelineLoading(false));
+  }, [selectedCaseId]);
+
+  // Fetch all evidence to calculate this week's trend
+  useEffect(() => {
+    evidenceApi.listAll()
+      .then(ev => {
+        const now = new Date();
+        const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const recent = ev.filter(e => new Date(e.uploaded_at) >= oneWeekAgo);
+        setEvidenceThisWeek(recent.length);
+      })
+      .catch(console.error);
+  }, []);
+
+  const selectedCase: Case | undefined = cases.find((c) => c.id === selectedCaseId);
 
   const totalEvidence = cases.reduce((s, c) => s + (c.evidence_count ?? 0), 0);
   const openCases     = cases.filter((c) => c.status === "OPEN").length;
   const flaggedCases  = cases.filter((c) => c.status === "UNDER_REVIEW").length;
 
+  // Dynamic trends from real data
+  const casesThisWeek    = countAddedThisWeek(cases);
+  // For evidence, we don't have individual timestamps available at this level,
+  // so we show total count as a fact, not a trend
+  const evidenceTrend = totalEvidence > 0 ? `${totalEvidence} total` : undefined;
+
   const handleTimelineEvent = (ev: TimelineEvent) => {
-    // Could open context panel here — handled at AppLayout level
     console.log("[Dashboard] Timeline event clicked:", ev.id);
   };
+
+  const VIEW_TABS: { label: "Timeline" | "Graph" | "Map"; icon: React.ReactNode }[] = [
+    { label: "Timeline", icon: <CalendarDays style={{ width: 12, height: 12 }} /> },
+    { label: "Graph",    icon: <GitGraph    style={{ width: 12, height: 12 }} /> },
+    { label: "Map",      icon: <Map         style={{ width: 12, height: 12 }} /> },
+  ];
 
   return (
     <div
       style={{ padding: "1.5rem 2rem", minHeight: "100%", display: "flex", flexDirection: "column", gap: "1.5rem" }}
       className="animate-fade-in"
     >
-
-
       {/* Page header */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>
@@ -101,11 +194,10 @@ export function Dashboard() {
             Investigation Dashboard
           </h1>
           <p style={{ fontSize: "0.8rem", color: "var(--color-text-muted)", marginTop: 4 }}>
-            Active workspace: <span style={{ color: "var(--color-text-body)" }}>Fraud Investigations</span>
-            {" "}· Last 7 days
+            {loading ? "Loading…" : `${cases.length} case${cases.length !== 1 ? "s" : ""} · ${totalEvidence} evidence files`}
           </p>
         </div>
-        <Link to="/cases">
+        <Link to="/cases/new">
           <Button icon={<Plus style={{ width: 14, height: 14 }} />} size="md">
             New Case
           </Button>
@@ -119,7 +211,7 @@ export function Dashboard() {
           value={loading ? "—" : cases.length}
           label="Total Cases"
           loading={loading}
-          trend="+2 this week"
+          trend={casesThisWeek > 0 ? `+${casesThisWeek} this week` : undefined}
         />
         <StatCard
           icon={<FileVideo style={{ width: 16, height: 16 }} />}
@@ -127,7 +219,7 @@ export function Dashboard() {
           label="Evidence Files"
           loading={loading}
           accent="#10b981"
-          trend="+8 this week"
+          trend={evidenceThisWeek !== null && evidenceThisWeek > 0 ? `+${evidenceThisWeek} this week` : undefined}
         />
         <StatCard
           icon={<Clock style={{ width: 16, height: 16 }} />}
@@ -147,78 +239,121 @@ export function Dashboard() {
 
       {/* Case Storyline Timeline */}
       <div className="card" style={{ overflow: "hidden" }}>
+        {/* Header row */}
         <div
           style={{
             display: "flex", alignItems: "center", justifyContent: "space-between",
             padding: "0.875rem 1.25rem",
             borderBottom: "1px solid var(--color-border)",
+            gap: 16, flexWrap: "wrap",
           }}
         >
-          <div>
-            <h2 style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--color-text-primary)" }}>
-              Case Storyline
-            </h2>
-            <p style={{ fontSize: "0.7rem", color: "var(--color-text-muted)", marginTop: 2 }}>
-              CASE-2026-001 · Aug 19, 2026 · Click events to inspect
-            </p>
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            {[
-              { label: "Timeline", active: true },
-              { label: "Graph",    active: false },
-              { label: "Map",      active: false },
-            ].map((v) => (
-              <button
-                key={v.label}
+          {/* Left: Title + Case Selector */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div>
+              <h2 style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--color-text-primary)" }}>
+                Case Storyline
+              </h2>
+              {selectedCase && (
+                <p style={{ fontSize: "0.7rem", color: "var(--color-text-muted)", marginTop: 2 }}>
+                  {selectedCase.case_number} · Created {formatDate(selectedCase.created_at)} · Click events to inspect
+                </p>
+              )}
+            </div>
+
+            {/* Case dropdown selector */}
+            {cases.length > 0 && (
+              <select
+                value={selectedCaseId ?? ""}
+                onChange={(e) => setSelectedCaseId(e.target.value)}
                 style={{
+                  background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)",
+                  borderRadius: 6, color: "var(--color-text-body)", fontSize: "0.75rem",
+                  padding: "4px 8px", cursor: "pointer", outline: "none",
+                  transition: "border-color 0.15s",
+                }}
+                aria-label="Select case for timeline"
+              >
+                {cases.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.case_number} — {c.title}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {/* Right: View tabs */}
+          <div style={{ display: "flex", gap: 4 }}>
+            {VIEW_TABS.map(({ label, icon }) => (
+              <button
+                key={label}
+                onClick={() => setViewMode(label)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5,
                   padding: "0.25rem 0.75rem", borderRadius: 6, fontSize: "0.72rem", fontWeight: 500,
                   cursor: "pointer", border: "1px solid",
-                  background: v.active ? "var(--color-accent)" : "transparent",
-                  borderColor: v.active ? "var(--color-accent)" : "var(--color-border)",
-                  color: v.active ? "white" : "var(--color-text-muted)",
+                  background: viewMode === label ? "var(--color-accent)" : "transparent",
+                  borderColor: viewMode === label ? "var(--color-accent)" : "var(--color-border)",
+                  color: viewMode === label ? "white" : "var(--color-text-muted)",
                   transition: "all 0.15s",
                 }}
-                aria-pressed={v.active}
+                aria-pressed={viewMode === label}
               >
-                {v.label}
+                {icon}
+                {label}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Timeline */}
-        <div style={{ padding: "0.5rem 0" }}>
-          <div>
-            <TimelineView onEventClick={handleTimelineEvent} />
-          </div>
-        </div>
-
-        {/* Legend */}
-        <div
-          style={{
-            display: "flex", gap: 16, padding: "0.625rem 1.25rem",
-            borderTop: "1px solid var(--color-border)",
-          }}
-        >
-          {[
-            { color: "#3b82f6", label: "Login" },
-            { color: "#f59e0b", label: "Transaction" },
-            { color: "#ef4444", label: "Detection" },
-            { color: "#10b981", label: "Document" },
-            { color: "#ec4899", label: "Alert" },
-          ].map((l) => (
-            <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <span
-                style={{
-                  width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
-                  background: l.color,
-                  boxShadow: `0 0 4px ${l.color}80`,
-                }}
-              />
-              <span style={{ fontSize: "0.65rem", color: "var(--color-text-muted)" }}>{l.label}</span>
+        {/* Content area */}
+        {viewMode === "Timeline" ? (
+          <>
+            {/* Horizontal scrollable timeline */}
+            <div
+              style={{
+                overflowX: "auto",
+                overflowY: "hidden",
+                paddingBottom: "0.5rem",
+                opacity: timelineLoading ? 0.5 : 1,
+                transition: "opacity 0.2s",
+              }}
+              className="timeline-scroll-container"
+            >
+              <TimelineView events={timelineEvents} onEventClick={handleTimelineEvent} />
             </div>
-          ))}
-        </div>
+
+            {/* Legend */}
+            <div
+              style={{
+                display: "flex", gap: 16, padding: "0.625rem 1.25rem",
+                borderTop: "1px solid var(--color-border)",
+              }}
+            >
+              {[
+                { color: "#3b82f6", label: "Login" },
+                { color: "#f59e0b", label: "Transaction" },
+                { color: "#ef4444", label: "Detection" },
+                { color: "#10b981", label: "Document" },
+                { color: "#ec4899", label: "Alert" },
+              ].map((l) => (
+                <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <span
+                    style={{
+                      width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                      background: l.color,
+                      boxShadow: `0 0 4px ${l.color}80`,
+                    }}
+                  />
+                  <span style={{ fontSize: "0.65rem", color: "var(--color-text-muted)" }}>{l.label}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <ComingSoonPane label={viewMode} />
+        )}
       </div>
 
       {/* Recent Cases */}

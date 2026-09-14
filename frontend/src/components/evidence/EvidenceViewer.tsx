@@ -4,6 +4,7 @@ import {
   Bot, Sparkles, RefreshCw, AlertTriangle, ShieldAlert, Cpu, ExternalLink
 } from "lucide-react";
 import { Button } from "../ui/Button";
+import ReactMarkdown from "react-markdown";
 
 interface TextChunk {
   id: string;
@@ -54,6 +55,14 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
   const [availableModels, setAvailableModels] = useState<string[]>(["llama3.2:1b"]);
 
   const mediaRef = useRef<HTMLMediaElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Cleanup poll on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -75,20 +84,65 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
         const res = await fetch("/api/analysis/models");
         if (res.ok) {
           const data = await res.json();
-          if (mounted && data.models && data.models.length > 0) {
-            setAvailableModels(data.models);
-            setSelectedModel(data.default || data.models[0]);
+          // Only show completion-capable models, not embeddings-only
+          const completionModels: string[] = (data.models || []).filter((m: string) =>
+            !m.includes("embed") && !m.includes("nomic")
+          );
+          const modelsToShow = completionModels.length > 0 ? completionModels : (data.models || []);
+          if (mounted && modelsToShow.length > 0) {
+            setAvailableModels(modelsToShow);
+            // Pick the default: prefer configured default if in list, else first
+            const preferredDefault = data.default;
+            setSelectedModel(
+              modelsToShow.includes(preferredDefault) ? preferredDefault : modelsToShow[0]
+            );
           }
         }
       } catch (err) {
-        // fallback
+        // fallback: keep initial state
       }
     }
 
     fetchEvidence();
     fetchModels();
+
+    const socket = (window as any).__socket || null; // Fallback if socket is attached globally, otherwise we can import it.
+    // Let's actually import getSocket if it's available. We'll import it at the top.
+    
     return () => { mounted = false; };
   }, [evidenceId]);
+
+  const handleGenerateTranscript = async () => {
+    setEvidence(e => e ? { ...e, transcription_status: "TRANSCRIBING" } : null);
+    try {
+      const res = await fetch(`/api/evidence/${evidenceId}/transcribe`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed to start transcription");
+      
+      // Poll every 3 seconds for the updated transcript
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = setInterval(async () => {
+        try {
+          const r = await fetch(`/api/evidence/${evidenceId}`);
+          if (r.ok) {
+            const data = await r.json();
+            // Done when we have chunks or status is FAILED/COMPLETED
+            if ((data.textChunks && data.textChunks.length > 0) || 
+                data.transcription_status === "FAILED" ||
+                data.transcription_status === "TRANSCRIBED") {
+              setEvidence(data);
+              if (pollRef.current) {
+                clearInterval(pollRef.current);
+                pollRef.current = null;
+              }
+            }
+          }
+        } catch (e) {}
+      }, 3000);
+    } catch (err) {
+      console.error(err);
+      setEvidence(e => e ? { ...e, transcription_status: "FAILED" } : null);
+    }
+  };
 
   const handleSeek = (time: number | null) => {
     if (time !== null && mediaRef.current) {
@@ -314,10 +368,29 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
                   <span>Click any transcript segment on the right to jump directly to that timestamp.</span>
                 </div>
               </div>
+            ) : evidence.file_type === "IMAGE" ? (
+              <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <img 
+                  src={mediaUrl} 
+                  alt={evidence.file_name} 
+                  style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 8, boxShadow: "0 10px 30px rgba(0,0,0,0.5)", objectFit: "contain" }}
+                />
+              </div>
+            ) : evidence.file_type === "DOCUMENT" && evidence.file_name.toLowerCase().endsWith('.pdf') ? (
+              <div style={{ width: "100%", height: "100%", background: "#fff", borderRadius: 8, overflow: "hidden" }}>
+                <iframe 
+                  src={mediaUrl} 
+                  style={{ width: "100%", height: "100%", border: "none" }}
+                  title={evidence.file_name}
+                />
+              </div>
             ) : (
               <div style={{ color: "var(--color-text-muted)", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
                 <FileText size={48} style={{ color: "var(--color-border-bright)" }} />
-                <p style={{ fontSize: "0.875rem" }}>Document / Image preview available in Inspector tab.</p>
+                <p style={{ fontSize: "0.875rem" }}>Preview not available for this file type.</p>
+                <a href={mediaUrl} download style={{ color: "var(--color-accent)", fontSize: "0.75rem", textDecoration: "underline", marginTop: "8px" }}>
+                  Download {evidence.file_name}
+                </a>
               </div>
             )}
           </div>
@@ -353,7 +426,7 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
                   }}
                 >
                   <FileText size={14} style={{ color: "#a855f7" }} />
-                  <span>Whisper Transcript</span>
+                  <span>{(evidence.file_type === "AUDIO" || evidence.file_type === "VIDEO") ? "Whisper Transcript" : "OCR Text Extraction"}</span>
                   {chunks.length > 0 && (
                     <span style={{ fontSize: "0.65rem", background: "rgba(168,85,247,0.15)", color: "#c084fc", padding: "1px 5px", borderRadius: 10 }}>
                       {chunks.length}
@@ -502,13 +575,38 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
                   ) : (
                     <div style={{ textAlign: "center", padding: "3rem 1rem", color: "var(--color-text-subtle)" }}>
                       <p style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--color-text-muted)" }}>
-                        {searchQuery ? "No matching dialogue found" : "No transcript available"}
+                        {searchQuery ? "No matching text found" : "No extracted text available"}
                       </p>
                       <p style={{ fontSize: "0.75rem", marginTop: 4 }}>
-                        {evidence.transcription_status === "TRANSCRIBING" || evidence.status === "PROCESSING"
-                          ? "Whisper speech-to-text pipeline is currently processing..."
-                          : "Upload audio/video recordings to generate transcripts."}
+                        {evidence.transcription_status === "TRANSCRIBING"
+                          ? "Pipeline is currently processing..."
+                          : (evidence.file_type === "AUDIO" || evidence.file_type === "VIDEO") 
+                             ? "Click below to run the Whisper AI speech-to-text pipeline." 
+                             : "No OCR text extraction has been generated for this file."}
                       </p>
+                      {/* Show spinner while transcribing */}
+                      {evidence.transcription_status === "TRANSCRIBING" && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16, color: "var(--color-accent)", fontSize: "0.78rem", justifyContent: "center" }}>
+                          <RefreshCw size={14} className="animate-spin" />
+                          <span>Processing — this may take a minute...</span>
+                        </div>
+                      )}
+                      {/* Show button when audio/video and not currently transcribing */}
+                      {(evidence.file_type === "AUDIO" || evidence.file_type === "VIDEO") &&
+                       evidence.transcription_status !== "TRANSCRIBING" && (
+                        <div style={{ marginTop: 16 }}>
+                          <Button 
+                            variant="primary" 
+                            size="sm" 
+                            icon={<FileText size={14} />}
+                            onClick={handleGenerateTranscript}
+                          >
+                            {evidence.transcription_status === "FAILED" 
+                              ? "Retry Whisper Transcription" 
+                              : "Generate Whisper Transcript"}
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -587,18 +685,28 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
                         style={{
                           display: "flex", alignItems: "center", justifyContent: "space-between",
                           padding: "0.75rem 1rem", borderRadius: 8,
-                          background: analysisResult.risk_level === "HIGH" ? "rgba(239,68,68,0.1)" : "rgba(245,158,11,0.1)",
-                          border: `1px solid ${analysisResult.risk_level === "HIGH" ? "rgba(239,68,68,0.3)" : "rgba(245,158,11,0.3)"}`,
+                          background: analysisResult.risk_level === "HIGH" 
+                            ? "rgba(239,68,68,0.1)" 
+                            : analysisResult.risk_level === "LOW" 
+                              ? "rgba(16,185,129,0.1)" 
+                              : "rgba(245,158,11,0.1)",
+                          border: `1px solid ${
+                            analysisResult.risk_level === "HIGH" 
+                              ? "rgba(239,68,68,0.3)" 
+                              : analysisResult.risk_level === "LOW" 
+                                ? "rgba(16,185,129,0.3)" 
+                                : "rgba(245,158,11,0.3)"
+                          }`,
                         }}
                       >
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <ShieldAlert size={18} style={{ color: analysisResult.risk_level === "HIGH" ? "#ef4444" : "#f59e0b" }} />
+                          <ShieldAlert size={18} style={{ color: analysisResult.risk_level === "HIGH" ? "#ef4444" : analysisResult.risk_level === "LOW" ? "#10b981" : "#f59e0b" }} />
                           <div>
                             <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--color-text-primary)", textTransform: "uppercase" }}>
                               Forensic Risk Level: {analysisResult.risk_level}
                             </span>
                             <p style={{ fontSize: "0.68rem", color: "var(--color-text-muted)" }}>
-                              Corroborates structured ₹4.7L anomalies in bank statements.
+                              Based on Whisper transcript analysis via {analysisResult.model_used}
                             </p>
                           </div>
                         </div>
@@ -612,11 +720,13 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
                         style={{
                           background: "var(--color-bg-elevated)", padding: "1.25rem",
                           borderRadius: 8, border: "1px solid var(--color-border)",
-                          fontSize: "0.82rem", lineHeight: 1.6, color: "var(--color-text-body)",
-                          whiteSpace: "pre-wrap",
+                          fontSize: "0.85rem", lineHeight: 1.6, color: "var(--color-text-body)",
                         }}
+                        className="markdown-content"
                       >
-                        {analysisResult.analysis}
+                        <ReactMarkdown>
+                          {analysisResult.analysis}
+                        </ReactMarkdown>
                       </div>
                     </div>
                   ) : (

@@ -20,22 +20,22 @@ const INITIAL_LEADS: ContextPanelItem[] = [
       "IP clustering analysis shows 5 of 7 IPs belong to known VPN exit nodes. " +
       "Temporal pattern aligns with known account-takeover sequences in the fraud dataset.",
     details: {
-      "User ID":    "KP-2234",
-      "IP Range":   "45.32.x.x / 192.168.x.x",
+      "User ID": "KP-2234",
+      "IP Range": "45.32.x.x / 192.168.x.x",
       "Time Range": "00:12 – 03:41 UTC",
-      "Logins":     "23",
+      "Logins": "23",
       "Unique IPs": "7",
     },
     relatedItems: [
-      { label: "Case",     value: "CASE-2026-001" },
+      { label: "Case", value: "CASE-2026-001" },
       { label: "Evidence", value: "access_log_aug19.csv" },
-      { label: "Cluster",  value: "IP-CLUSTER-04" },
+      { label: "Cluster", value: "IP-CLUSTER-04" },
     ],
   },
   {
     id: "L002",
     title: "Transaction cluster — ₹4.7L split payments",
-    subtitle: "14 transactions just below ₹50,000 threshold in 6h",
+    subtitle: "14 transactions below ₹50,000 threshold in 6h",
     type: "lead", risk: "high", confidence: 87,
     timestamp: "2026-08-19 08:15",
     aiReasoning:
@@ -44,13 +44,13 @@ const INITIAL_LEADS: ContextPanelItem[] = [
       "with no prior relationship. This aligns with smurfing behaviour in PMLA guidelines.",
     details: {
       "Source Account": "ACC-887",
-      "Total Amount":   "₹4,70,000",
-      "Transactions":   "14",
-      "Time Window":    "6 hours",
-      "Recipients":     "6 accounts",
+      "Total Amount": "₹4,70,000",
+      "Transactions": "14",
+      "Time Window": "6 hours",
+      "Recipients": "6 accounts",
     },
     relatedItems: [
-      { label: "Case",    value: "CASE-2026-001" },
+      { label: "Case", value: "CASE-2026-001" },
       { label: "Pattern", value: "SMURFING-v2" },
     ],
   },
@@ -65,15 +65,15 @@ const INITIAL_LEADS: ContextPanelItem[] = [
       "Grad-CAM heatmap shows activation concentrated on the right hand of subject. " +
       "REVIEW REQUIRED — human verification mandatory before any legal inference.",
     details: {
-      "File":        "CCTV_lobby_aug19.mp4",
-      "Frame":       "3260",
-      "Timestamp":   "02:14:33",
-      "Detection":   "Possible firearm",
-      "Confidence":  "78.3%",
+      "File": "CCTV_lobby_aug19.mp4",
+      "Frame": "3260",
+      "Timestamp": "02:14:33",
+      "Detection": "Possible firearm",
+      "Confidence": "78.3%",
     },
     relatedItems: [
-      { label: "Evidence",  value: "CCTV_lobby_aug19.mp4" },
-      { label: "Grad-CAM",  value: "heatmap_frame3260.png" },
+      { label: "Evidence", value: "CCTV_lobby_aug19.mp4" },
+      { label: "Grad-CAM", value: "heatmap_frame3260.png" },
     ],
   },
   {
@@ -87,14 +87,14 @@ const INITIAL_LEADS: ContextPanelItem[] = [
       "cosine similarity in behavioral vectors. Session overlap analysis confirms " +
       "at least 3 accounts were active simultaneously from the same device.",
     details: {
-      "Accounts":    "5",
-      "Similarity":  "94%",
-      "Overlap":     "3 concurrent",
-      "Device ID":   "DEVF-4420",
+      "Accounts": "5",
+      "Similarity": "94%",
+      "Overlap": "3 concurrent",
+      "Device ID": "DEVF-4420",
     },
     relatedItems: [
       { label: "Cluster", value: "BEHAV-CLUSTER-01" },
-      { label: "Case",    value: "CASE-2026-001" },
+      { label: "Case", value: "CASE-2026-001" },
     ],
   },
 ];
@@ -125,9 +125,9 @@ const MOCK_ACTIVITY = [
 type Tab = "leads" | "hypotheses" | "gaps" | "activity";
 
 const RISK_CONFIG = {
-  high:   { color: "#ef4444", bg: "rgba(239,68,68,0.1)", label: "HIGH" },
+  high: { color: "#ef4444", bg: "rgba(239,68,68,0.1)", label: "HIGH" },
   medium: { color: "#f59e0b", bg: "rgba(245,158,11,0.1)", label: "MED" },
-  low:    { color: "#10b981", bg: "rgba(16,185,129,0.1)", label: "LOW" },
+  low: { color: "#10b981", bg: "rgba(16,185,129,0.1)", label: "LOW" },
 };
 
 function LeadsTab({ leads, onSelect }: { leads: ContextPanelItem[], onSelect: (item: ContextPanelItem, list: ContextPanelItem[]) => void }) {
@@ -215,7 +215,7 @@ function LeadsTab({ leads, onSelect }: { leads: ContextPanelItem[], onSelect: (i
 
 function HypothesesTab({ onSelect }: { onSelect: (item: ContextPanelItem, list: ContextPanelItem[]) => void }) {
   const STATUS_COLOR: Record<string, string> = { exploring: "#3b82f6", validated: "#10b981", rejected: "#6b7280" };
-  
+
   const mappedHypotheses: ContextPanelItem[] = MOCK_HYPOTHESES.map(h => ({
     id: h.id,
     title: h.text,
@@ -279,9 +279,9 @@ function HypothesesTab({ onSelect }: { onSelect: (item: ContextPanelItem, list: 
 
 function GapsTab() {
   const SEV: Record<string, { color: string; bg: string }> = {
-    high:   { color: "#ef4444", bg: "rgba(239,68,68,0.1)" },
+    high: { color: "#ef4444", bg: "rgba(239,68,68,0.1)" },
     medium: { color: "#f59e0b", bg: "rgba(245,158,11,0.1)" },
-    low:    { color: "#10b981", bg: "rgba(16,185,129,0.1)" },
+    low: { color: "#10b981", bg: "rgba(16,185,129,0.1)" },
   };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0.75rem 1rem", overflowY: "auto", flex: 1 }}>
@@ -334,11 +334,11 @@ function ActivityTab() {
               display: "flex", alignItems: "center", justifyContent: "center",
             }}
           >
-            {a.icon === "ai"     && <Brain style={{ width: 11, height: 11, color: "var(--color-accent)" }} />}
-            {a.icon === "check"  && <CheckCircle style={{ width: 11, height: 11, color: "#10b981" }} />}
+            {a.icon === "ai" && <Brain style={{ width: 11, height: 11, color: "var(--color-accent)" }} />}
+            {a.icon === "check" && <CheckCircle style={{ width: 11, height: 11, color: "#10b981" }} />}
             {a.icon === "update" && <TrendingUp style={{ width: 11, height: 11, color: "#f59e0b" }} />}
-            {a.icon === "tag"    && <User style={{ width: 11, height: 11, color: "var(--color-text-muted)" }} />}
-            {a.icon === "flag"   && <Globe style={{ width: 11, height: 11, color: "var(--color-text-muted)" }} />}
+            {a.icon === "tag" && <User style={{ width: 11, height: 11, color: "var(--color-text-muted)" }} />}
+            {a.icon === "flag" && <Globe style={{ width: 11, height: 11, color: "var(--color-text-muted)" }} />}
           </div>
           <div style={{ flex: 1 }}>
             <p style={{ fontSize: "0.76rem", color: "var(--color-text-body)", lineHeight: 1.4 }}>{a.text}</p>
@@ -363,7 +363,7 @@ export function IntelligenceStrip({ contextItem, onContextSelect, onContextClose
   const [collapsed, setCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("leads");
   const [leads, setLeads] = useState<ContextPanelItem[]>(INITIAL_LEADS);
-  
+
   useEffect(() => {
     const socket = getSocket();
     const handleNewLead = (newLead: any) => {
@@ -397,7 +397,7 @@ export function IntelligenceStrip({ contextItem, onContextSelect, onContextClose
       if (Math.abs(deltaY) > 5) {
         isMoved.current = true;
       }
-      
+
       if (isMoved.current) {
         setCollapsed(false);
         const newHeight = Math.max(200, Math.min(800, dragStartHeight.current + deltaY));
@@ -428,10 +428,10 @@ export function IntelligenceStrip({ contextItem, onContextSelect, onContextClose
   }, [contextItem]);
 
   const TABS: { key: Tab; label: string; count?: number; icon: React.ReactNode }[] = [
-    { key: "leads",       label: "Leads",           count: leads.length,       icon: <Zap style={{ width: 11, height: 11 }} /> },
-    { key: "hypotheses",  label: "Hypotheses",      count: MOCK_HYPOTHESES.length,  icon: <Brain style={{ width: 11, height: 11 }} /> },
-    { key: "gaps",        label: "Gaps",            count: MOCK_GAPS.length,        icon: <AlertCircle style={{ width: 11, height: 11 }} /> },
-    { key: "activity",    label: "Recent Activity", count: MOCK_ACTIVITY.length,    icon: <Clock style={{ width: 11, height: 11 }} /> },
+    { key: "leads", label: "Leads", count: leads.length, icon: <Zap style={{ width: 11, height: 11 }} /> },
+    { key: "hypotheses", label: "Hypotheses", count: MOCK_HYPOTHESES.length, icon: <Brain style={{ width: 11, height: 11 }} /> },
+    { key: "gaps", label: "Gaps", count: MOCK_GAPS.length, icon: <AlertCircle style={{ width: 11, height: 11 }} /> },
+    { key: "activity", label: "Recent Activity", count: MOCK_ACTIVITY.length, icon: <Clock style={{ width: 11, height: 11 }} /> },
   ];
 
   return (
@@ -505,10 +505,10 @@ export function IntelligenceStrip({ contextItem, onContextSelect, onContextClose
 
           {/* Tab Content */}
           <div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
-            {activeTab === "leads"      && <LeadsTab leads={leads} onSelect={onContextSelect} />}
+            {activeTab === "leads" && <LeadsTab leads={leads} onSelect={onContextSelect} />}
             {activeTab === "hypotheses" && <HypothesesTab onSelect={onContextSelect} />}
-            {activeTab === "gaps"       && <GapsTab />}
-            {activeTab === "activity"   && <ActivityTab />}
+            {activeTab === "gaps" && <GapsTab />}
+            {activeTab === "activity" && <ActivityTab />}
           </div>
         </div>
       )}

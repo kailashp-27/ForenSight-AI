@@ -195,6 +195,21 @@ async def upload_evidence(
     return evidence
 
 
+@router.get("")
+async def list_all_evidence():
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT e.*, c.case_number, c.title as case_title
+               FROM evidence e
+               LEFT JOIN cases c ON e.case_id = c.id
+               ORDER BY e.uploaded_at DESC"""
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
 @router.get("/{evidence_id}")
 async def get_evidence(evidence_id: str):
     db = await get_db()
@@ -264,6 +279,67 @@ async def stream_media(evidence_id: str):
             raise HTTPException(status_code=404, detail="File missing from storage")
             
         return FileResponse(file_path, media_type=ev["mime_type"], headers={"Accept-Ranges": "bytes"})
+    finally:
+        await db.close()
+
+
+@router.post("/{evidence_id}/transcribe")
+async def transcribe_evidence(evidence_id: str, background_tasks: BackgroundTasks):
+    db = await get_db()
+    try:
+        row = await db.execute("SELECT file_path, file_type FROM evidence WHERE id = %s", (evidence_id,))
+        ev = dict(await row.fetchone() or {})
+        if not ev:
+            raise HTTPException(status_code=404, detail="Evidence not found")
+        
+        if ev["file_type"] not in ("AUDIO", "VIDEO"):
+            raise HTTPException(status_code=400, detail="Only AUDIO and VIDEO files can be transcribed")
+        
+        file_path = ev["file_path"]
+        
+        async def _run_transcription():
+            from backend.main import sio
+            await sio.emit("evidence:status_update", {
+                "evidence_id": evidence_id,
+                "status": "PROCESSING",
+                "progress": 30,
+                "message": "Running Whisper transcription...",
+            })
+            try:
+                await run_whisper_extraction(evidence_id, file_path)
+                
+                # Fetch new chunks
+                async_db = await get_db()
+                try:
+                    chunk_cursor = await async_db.execute(
+                        "SELECT * FROM text_chunks WHERE evidence_id = %s ORDER BY chunk_index",
+                        (evidence_id,),
+                    )
+                    chunks = [dict(r) for r in await chunk_cursor.fetchall()]
+                    await sio.emit("evidence:transcription_complete", {
+                        "evidence_id": evidence_id,
+                        "chunks": chunks
+                    })
+                finally:
+                    await async_db.close()
+                    
+                await sio.emit("evidence:status_update", {
+                    "evidence_id": evidence_id,
+                    "status": "COMPLETED",
+                    "progress": 100,
+                    "message": "Whisper transcription complete.",
+                })
+            except Exception as e:
+                print(f"Whisper manual transcription failed: {e}")
+                await sio.emit("evidence:status_update", {
+                    "evidence_id": evidence_id,
+                    "status": "FAILED",
+                    "message": f"Whisper failed: {str(e)}",
+                })
+                
+        background_tasks.add_task(_run_transcription)
+        
+        return {"status": "started", "message": "Transcription started in the background"}
     finally:
         await db.close()
 

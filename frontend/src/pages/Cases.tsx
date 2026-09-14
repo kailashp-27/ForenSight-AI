@@ -1,6 +1,6 @@
 // frontend/src/pages/Cases.tsx
 import React, { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Plus, Search, FolderOpen, ChevronRight, X } from "lucide-react";
 import { Badge, statusToVariant } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -15,6 +15,7 @@ function formatDate(iso: string): string {
 export function Cases() {
   const { cases, loading, fetchCases, createCase } = useCaseStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -22,6 +23,14 @@ export function Cases() {
   const [formError, setFormError] = useState("");
 
   useEffect(() => { fetchCases(); }, [fetchCases]);
+
+  useEffect(() => {
+    if (location.pathname === "/cases/new") {
+      setShowModal(true);
+      // Clean up URL so refresh doesn't reopen it
+      window.history.replaceState(null, "", "/cases");
+    }
+  }, [location.pathname]);
 
   const filtered = cases.filter(
     (c) =>

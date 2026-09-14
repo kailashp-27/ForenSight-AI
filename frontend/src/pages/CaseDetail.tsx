@@ -1,6 +1,6 @@
 // frontend/src/pages/CaseDetail.tsx
 import React, { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useLocation } from "react-router-dom";
 import {
   ChevronRight, Upload, FileVideo, FileImage, FileAudio,
   FileText, File, MoreHorizontal, ArrowLeft, AlertTriangle,
@@ -35,8 +35,18 @@ export function CaseDetail() {
   const { selectedCase, loading, fetchCase } = useCaseStore();
   const [showUpload, setShowUpload] = useState(false);
   const [viewingEvidenceId, setViewingEvidenceId] = useState<string | null>(null);
+  const [filterType, setFilterType] = useState<string>("ALL");
+  const location = useLocation();
 
   useEffect(() => { if (id) fetchCase(id); }, [id, fetchCase]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const evId = params.get("evidence");
+    if (evId) {
+      setViewingEvidenceId(evId);
+    }
+  }, [location.search]);
 
   const handleUploadSuccess = () => {
     if (id) fetchCase(id);
@@ -44,7 +54,7 @@ export function CaseDetail() {
   };
 
   /* ── Loading skeleton ── */
-  if (loading && !selectedCase) {
+  if (loading && (!selectedCase || selectedCase.id !== id)) {
     return (
       <div style={{ padding: "1.5rem 2rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
         <div className="skeleton" style={{ height: 16, width: 200 }} />
@@ -57,7 +67,7 @@ export function CaseDetail() {
     );
   }
 
-  if (!selectedCase) {
+  if (!selectedCase || selectedCase.id !== id) {
     return (
       <div style={{ padding: "2rem", textAlign: "center" }}>
         <p style={{ color: "var(--color-text-muted)", fontSize: "0.875rem" }}>Case not found.</p>
@@ -70,8 +80,6 @@ export function CaseDetail() {
       </div>
     );
   }
-
-  const [filterType, setFilterType] = useState<string>("ALL");
 
   const evidence: Evidence[] = selectedCase.evidence ?? [];
   const audioCount = evidence.filter((e) => e.file_type === "AUDIO").length;
@@ -412,7 +420,7 @@ export function CaseDetail() {
                 ✕
               </button>
             </div>
-            <div style={{ flex: 1, overflow: "hidden" }}>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <EvidenceUploadWizard
                 caseId={selectedCase.id}
                 onSuccess={handleUploadSuccess}

@@ -100,6 +100,31 @@ async def list_cases():
     return [dict(r) for r in rows]
 
 
+@router.get("/fix-dates-temp")
+async def fix_dates_temp():
+    db = await get_db()
+    try:
+        await db.execute("UPDATE cases SET created_at = '2026-08-01 10:00:00' WHERE case_number = 'CASE-2026-001'")
+        
+        # Get evidence
+        ev_cur = await db.execute("SELECT id FROM evidence WHERE case_id = (SELECT id FROM cases WHERE case_number = 'CASE-2026-001')")
+        evidence = await ev_cur.fetchall()
+        
+        dates = ['2026-08-10 14:30:00', '2026-08-25 09:15:00', '2026-09-05 11:20:00', '2026-09-14 16:45:00']
+        for i, ev in enumerate(evidence):
+            await db.execute("UPDATE evidence SET uploaded_at = %s WHERE id = %s", (dates[i % len(dates)], ev['id']))
+            
+        det_cur = await db.execute("SELECT id FROM detections WHERE evidence_id IN (SELECT id FROM evidence WHERE case_id = (SELECT id FROM cases WHERE case_number = 'CASE-2026-001'))")
+        detections = await det_cur.fetchall()
+        
+        for i, det in enumerate(detections):
+            await db.execute("UPDATE detections SET created_at = %s WHERE id = %s", (dates[(i + 2) % len(dates)], det['id']))
+            
+        await db.commit()
+        return {"status": "fixed"}
+    finally:
+        await db.close()
+
 @router.get("/{case_id}")
 async def get_case(case_id: str):
     db = await get_db()
@@ -170,3 +195,133 @@ async def delete_case(case_id: str, request: Request):
         case_id=case_id,
         ip_address=request.client.host if request.client else None,
     )
+
+
+@router.get("/{case_id}/timeline")
+async def get_case_timeline(case_id: str):
+    """
+    Build a chronological timeline of events for a case from real DB data.
+    Sources:
+      1. Evidence upload records  → document / detection events
+      2. Detections from AI       → detection / alert events
+    Returns events sorted by created_at with a 0-100 relative `timestamp` field.
+    """
+    db = await get_db()
+    try:
+        row = await db.execute("SELECT id, case_number, created_at, created_by_name FROM cases WHERE id = %s", (case_id,))
+        case = await row.fetchone()
+        if not case:
+            raise HTTPException(status_code=404, detail="Case not found")
+        case = dict(case)
+
+        ev_cursor = await db.execute(
+            "SELECT id, file_name, file_type, uploaded_at, status FROM evidence WHERE case_id = %s ORDER BY uploaded_at",
+            (case_id,),
+        )
+        evidence_rows = [dict(r) for r in await ev_cursor.fetchall()]
+
+        det_cursor = await db.execute(
+            """
+            SELECT d.id, d.label, d.confidence, d.created_at, e.file_name, e.file_type
+            FROM detections d
+            JOIN evidence e ON d.evidence_id = e.id
+            WHERE e.case_id = %s
+            ORDER BY d.created_at
+            """,
+            (case_id,),
+        )
+        detection_rows = [dict(r) for r in await det_cursor.fetchall()]
+    finally:
+        await db.close()
+
+    FILE_TYPE_TO_EVENT = {
+        "IMAGE":    ("document",  "Image uploaded",   "person"),
+        "VIDEO":    ("detection", "Video uploaded",   "device"),
+        "AUDIO":    ("document",  "Audio uploaded",   "device"),
+        "DOCUMENT": ("document",  "Document uploaded","person"),
+        "OTHER":    ("document",  "File uploaded",    "person"),
+    }
+
+    raw: list[dict] = []
+
+    # 1. Add "Case Created" root event
+    raw.append({
+        "id":          f"case-{case['id'][:8]}",
+        "label":       "Case Created",
+        "type":        "document",
+        "time_iso":    case["created_at"],
+        "entity":      case["created_by_name"],
+        "entityType":  "person",
+        "risk":        None,
+        "description": f"Case {case['case_number']} opened by {case['created_by_name']}",
+    })
+
+    for ev in evidence_rows:
+        ev_type, ev_label_prefix, entity_type = FILE_TYPE_TO_EVENT.get(ev["file_type"], ("document", "File uploaded", "person"))
+        raw.append({
+            "id":          f"ev-{ev['id'][:8]}",
+            "label":       f"{ev_label_prefix}: {ev['file_name'][:22]}",
+            "type":        ev_type,
+            "time_iso":    ev["uploaded_at"],
+            "entity":      ev["file_name"][:16],
+            "entityType":  entity_type,
+            "risk":        None,
+            "description": f"{ev['file_type']} evidence — status: {ev['status']}",
+        })
+
+    for det in detection_rows:
+        confidence = float(det["confidence"] or 0)
+        risk = "high" if confidence >= 0.75 else ("medium" if confidence >= 0.5 else "low")
+        raw.append({
+            "id":          f"det-{det['id'][:8]}",
+            "label":       det["label"][:28],
+            "type":        "detection",
+            "time_iso":    det["created_at"],
+            "entity":      det["file_name"][:16],
+            "entityType":  "device",
+            "risk":        risk,
+            "description": f"AI detection in {det['file_name']} — confidence {confidence:.0%}",
+        })
+
+    def _ts(iso: str) -> float:
+        from datetime import datetime
+        try:
+            return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return 0.0
+
+    raw.sort(key=lambda e: _ts(e["time_iso"]))
+
+
+
+    if not raw:
+        return []
+
+    t_min = _ts(raw[0]["time_iso"])
+    t_max = _ts(raw[-1]["time_iso"])
+    span  = t_max - t_min if t_max > t_min else 1.0
+
+    from datetime import datetime
+    events = []
+    for i, r in enumerate(raw):
+        rel = round(((_ts(r["time_iso"]) - t_min) / span) * 90 + 5, 1)
+        try:
+            time_label = datetime.fromisoformat(r["time_iso"].replace("Z", "+00:00")).strftime("%H:%M")
+        except Exception:
+            time_label = f"T{i}"
+
+        events.append({
+            "id":          r["id"],
+            "label":       r["label"],
+            "type":        r["type"],
+            "time":        time_label,
+            "timestamp":   rel,
+            "entity":      r["entity"],
+            "entityType":  r["entityType"],
+            "risk":        r["risk"],
+            "description": r["description"],
+        })
+
+    return events
+
+

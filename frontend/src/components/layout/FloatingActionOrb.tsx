@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   Plus, LayoutDashboard, FolderOpen, FileVideo,
-  BarChart2, Settings, HelpCircle, X,
+  BarChart2, Settings, X,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -12,7 +12,6 @@ const NAV_ITEMS = [
   { to: "/evidence", icon: FileVideo,       label: "Evidence" },
   { to: "/reports",  icon: BarChart2,       label: "Reports" },
   { to: "/settings", icon: Settings,        label: "Settings" },
-  { to: "/help",     icon: HelpCircle,      label: "Help" },
 ];
 
 const RADIUS = 68; // px from orb center to menu item center
