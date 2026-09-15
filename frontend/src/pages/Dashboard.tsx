@@ -310,16 +310,12 @@ export function Dashboard() {
         {/* Content area */}
         {viewMode === "Timeline" ? (
           <>
-            {/* Horizontal scrollable timeline */}
+            {/* Timeline — handles its own horizontal scroll internally */}
             <div
               style={{
-                overflowX: "auto",
-                overflowY: "hidden",
-                paddingBottom: "0.5rem",
                 opacity: timelineLoading ? 0.5 : 1,
                 transition: "opacity 0.2s",
               }}
-              className="timeline-scroll-container"
             >
               <TimelineView events={timelineEvents} onEventClick={handleTimelineEvent} />
             </div>

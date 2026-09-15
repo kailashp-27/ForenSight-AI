@@ -283,16 +283,25 @@ async def get_case_timeline(case_id: str):
             "description": f"AI detection in {det['file_name']} — confidence {confidence:.0%}",
         })
 
-    def _ts(iso: str) -> float:
-        from datetime import datetime
+    from datetime import datetime
+
+    def _to_dt(val) -> datetime | None:
+        """Convert a DB value (datetime object or ISO string) to a datetime."""
+        if val is None:
+            return None
+        if isinstance(val, datetime):
+            return val
         try:
-            return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+            return datetime.fromisoformat(str(val).replace("Z", "+00:00"))
         except Exception:
-            return 0.0
+            return None
 
+    def _ts(val) -> float:
+        dt = _to_dt(val)
+        return dt.timestamp() if dt else 0.0
+
+    # Sort chronologically
     raw.sort(key=lambda e: _ts(e["time_iso"]))
-
-
 
     if not raw:
         return []
@@ -301,14 +310,26 @@ async def get_case_timeline(case_id: str):
     t_max = _ts(raw[-1]["time_iso"])
     span  = t_max - t_min if t_max > t_min else 1.0
 
-    from datetime import datetime
+    # Decide label format: include date if events span more than 1 day
+    dt_first = _to_dt(raw[0]["time_iso"])
+    dt_last  = _to_dt(raw[-1]["time_iso"])
+    if dt_first and dt_last:
+        multi_day = (dt_last - dt_first).days >= 1
+    else:
+        multi_day = True
+
     events = []
     for i, r in enumerate(raw):
-        rel = round(((_ts(r["time_iso"]) - t_min) / span) * 90 + 5, 1)
-        try:
-            time_label = datetime.fromisoformat(r["time_iso"].replace("Z", "+00:00")).strftime("%H:%M")
-        except Exception:
-            time_label = f"T{i}"
+        ts_val = _ts(r["time_iso"])
+        rel = round(((ts_val - t_min) / span) * 90 + 5, 1)
+
+        dt = _to_dt(r["time_iso"])
+        if dt:
+            time_label = dt.strftime("%b %d %H:%M") if multi_day else dt.strftime("%H:%M")
+            desc_time  = dt.strftime("%Y-%m-%d %H:%M")
+        else:
+            time_label = f"Event {i+1}"
+            desc_time  = "unknown time"
 
         events.append({
             "id":          r["id"],
@@ -319,7 +340,7 @@ async def get_case_timeline(case_id: str):
             "entity":      r["entity"],
             "entityType":  r["entityType"],
             "risk":        r["risk"],
-            "description": r["description"],
+            "description": f"{r['description']} [{desc_time}]",
         })
 
     return events
