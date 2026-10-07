@@ -1,109 +1,81 @@
-# ForenSight AI — Intelligent Evidence Investigation System
+# ForenSight AI
 
-> A privacy-preserving, on-premise AI pipeline that ingests multi-modal forensic
-> evidence (CCTV, audio logs, case PDFs) and assists investigators with
-> explainable detections, grounded summarization, and an immutable audit trail —
-> **without making autonomous legal decisions**.
+A prototype workspace for organising investigation cases and reviewing uploaded evidence. The current implementation supports case records, evidence files, audio/video transcription with Whisper, and transcript analysis through a local Ollama model.
 
----
+The interface is built with React and TypeScript. FastAPI provides the API, Socket.IO reports processing progress, and an async MySQL connection stores case and evidence records.
 
-## Technology Stack
+## Current implementation
 
-| Layer | Technology |
-|---|---|
-| Backend API | Python 3.11 · FastAPI · Uvicorn |
-| Real-Time | Socket.io (python-socketio + socketio-client) |
-| Database ORM | Prisma (PostgreSQL) |
-| Frontend | React 18 · Vite · TypeScript · Tailwind CSS |
-| State Management | Zustand |
-| Vision (Phase 1) | YOLOv8 · Grad-CAM |
-| Extraction (Phase 2) | OpenAI Whisper · Tesseract / EasyOCR |
-| Embeddings (Phase 3) | Fine-tuned HuggingFace model · FAISS / Chroma |
-| LLM / RAG (Phase 4) | Ollama (Llama 3 / Mistral) · LangChain |
+- Create and browse cases and their associated evidence.
+- Upload supported audio, video, image, and document files.
+- Transcribe audio/video with Whisper's `base` model and review timestamped segments.
+- Generate a structured transcript report with a selected Ollama model.
+- View timelines, processing updates, and recorded activity.
 
----
+YOLO detection, OCR extraction, embeddings, and vector retrieval are planned or stubbed. The checked-in Prisma schema and SQLite file are not the runtime database used by `backend/database/db.py`.
 
-## Repository Structure
+## Run locally
 
-```
-ForenSight-AI/
-├── backend/
-│   ├── main.py              ← FastAPI + Socket.io entry-point
-│   ├── config.py            ← Typed settings (pydantic-settings)
-│   ├── database/
-│   │   ├── schema.prisma    ← Relational DB schema (PostgreSQL)
-│   │   └── vector_store.py  ← FAISS / Chroma abstraction layer
-│   ├── modules/
-│   │   ├── vision/          ← Phase 1: YOLOv8 + Grad-CAM
-│   │   ├── extraction/      ← Phase 2: Whisper + OCR
-│   │   ├── embeddings/      ← Phase 3: domain-specific embeddings
-│   │   └── rag/             ← Phase 4: Ollama RAG pipeline
-│   ├── routes/              ← FastAPI routers (cases, evidence, analysis, chat)
-│   └── storage/             ← Local evidence file storage (git-ignored)
-├── frontend/                ← Vite + React + TypeScript SPA
-├── requirements.txt
-├── .env.example
-└── README.md
-```
+Use Python 3.11, Node.js 22.12+, MySQL, Ollama, and FFmpeg. Make sure `ffmpeg` is available on your PATH for transcription.
 
----
-
-## Quick Start
-
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- MySQL (running locally or via Docker)
-- Ollama (for Phase 4)
-
-### 1. Backend
+From the repository root:
 
 ```bash
-# Create and activate venv
-python -m venv backend/.venv
-# Windows:
-backend\.venv\Scripts\activate
-# macOS/Linux:
-source backend/.venv/bin/activate
-
-# Install dependencies
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+pip install httpx
+```
 
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with your DATABASE_URL
+On Windows, activate with `.venv\Scripts\activate`. `httpx` is used by the analysis routes but is currently missing from `requirements.txt`.
 
-# (Optional) Generate Prisma client if using Prisma ORM features in the future
-prisma generate --schema=backend/database/schema.prisma
+Create a MySQL database named `forensight`. The configured database user must be able to create tables; the app creates them on startup.
 
-# Run the dev server (MySQL tables will be auto-created on startup)
+Copy `.env.example` to `.env` and update the connection and model settings:
+
+```env
+DATABASE_URL=mysql://username:password@localhost:3306/forensight
+STORAGE_DIR=backend/storage
+CORS_ORIGINS=["http://localhost:5173"]
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2:1b
+```
+
+Prepare the local text model and keep Ollama running:
+
+```bash
+ollama pull llama3.2:1b
+```
+
+Start the API from the repository root:
+
+```bash
 uvicorn backend.main:socket_app --reload --port 8000
 ```
 
-### 2. Frontend
+In another terminal:
 
 ```bash
 cd frontend
 npm install
-npm run dev          # Starts on http://localhost:5173
+npm run dev
 ```
 
----
+Open [localhost:5173](http://localhost:5173). API documentation is at [localhost:8000/api/docs](http://localhost:8000/api/docs). Whisper downloads its model on the first transcription.
 
-## Development Phases
+## Code guide
 
-| Phase | Focus | Status |
-|---|---|---|
-| Phase 1 | YOLOv8 detection + Grad-CAM XAI | 🔲 Pending |
-| Phase 2 | Whisper transcription + OCR extraction | 🔲 Pending |
-| Phase 3 | Domain embeddings + FAISS/Chroma indexing | 🔲 Pending |
-| Phase 4 | Ollama RAG + cited chronological timeline | 🔲 Pending |
-| Phase 5 | Pipeline integration + evaluation metrics | 🔲 Pending |
+| Path | Purpose |
+| --- | --- |
+| `backend/main.py` | FastAPI and Socket.IO entry point |
+| `backend/database/db.py` | MySQL connections and table setup |
+| `backend/routes/` | Cases, evidence, and transcript analysis |
+| `backend/modules/whisper_processor.py` | Transcription and segment storage |
+| `backend/storage/` | Local uploaded evidence |
+| `frontend/src/` | Case screens, evidence viewer, timelines, and state |
 
----
+From `frontend/`, use `npm run build` to create the browser bundle.
 
-## Ethical Guardrails
+## Interpreting AI output
 
-- The blood-stain / texture classifier is trained **exclusively on synthetic data** and will never declare a definitive biological conclusion.
-- The LLM assistant is hardcoded to **never infer guilt, suggest charges, or finalize legal determinations** without human verification.
-- Every investigator action is immutably recorded in the `AuditLog` table.
+Transcripts and generated reports need review against the original evidence. The prototype does not establish forensic validity, infer guilt, or replace an investigator's judgment. Its database activity records are ordinary stored records, not a verified immutable audit system.
