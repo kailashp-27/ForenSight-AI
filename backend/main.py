@@ -58,11 +58,12 @@ app.add_middleware(
 )
 
 # ── Route registration ─────────────────────────────────────────────────────────
-from backend.routes import cases, evidence, analysis
+from backend.routes import cases, evidence, analysis, forensic
 
 app.include_router(cases.router,    prefix="/api/cases",    tags=["Cases"])
 app.include_router(evidence.router, prefix="/api/evidence", tags=["Evidence"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
+app.include_router(forensic.router, prefix="/api/v1",        tags=["Forensic Workbench"])
 
 # Direct media endpoint alias for frontend convenience
 @app.get("/api/media/{evidence_id}", tags=["Media"])

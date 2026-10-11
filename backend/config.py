@@ -35,6 +35,23 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama3.2:1b"
 
+    # ── Local vision-language model (ROI inspection) ───────────────────────────
+    # Must be a vision-capable model already pulled into the local Ollama
+    # (e.g. `ollama pull qwen2.5vl:7b`). The endpoint host is validated to be
+    # loopback-only in vlm_client.py — the air-gap rule is enforced in code.
+    OLLAMA_VISION_MODEL: str = "qwen2.5vl:7b"
+    # Cold model loads can take 30-60s before generation starts.
+    VLM_TIMEOUT_S: float = 180.0
+    VLM_MAX_TOKENS: int = 250
+
+    # ── Chain of custody ───────────────────────────────────────────────────────
+    # AES-256-GCM key used to encrypt raw VLM payloads stored in audit_trail.
+    # Auto-generated on first run. Back it up: losing it makes stored payloads
+    # unrecoverable. The default sits under storage/, which is gitignored.
+    AUDIT_KEY_PATH: str = "backend/storage/.audit.key"
+    # Seconds within which two findings in one clip are linked "co_occurs".
+    GRAPH_COOCCURRENCE_WINDOW_S: float = 10.0
+
 
 # Singleton instance — import this everywhere
 settings = Settings()

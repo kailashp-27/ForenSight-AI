@@ -22,6 +22,8 @@ from fastapi.responses import JSONResponse, FileResponse
 from backend.config import settings
 from backend.database.db import get_db, write_audit_log
 from backend.modules.whisper_processor import run_whisper_extraction
+from backend.modules.vision.cv_engine import sha256_file
+from fastapi.concurrency import run_in_threadpool
 
 router = APIRouter()
 
@@ -158,13 +160,17 @@ async def upload_evidence(
 
     file_size = dest_path.stat().st_size
 
+    # Chain of custody: SHA-256 of the stored bytes, recorded at ingestion.
+    file_hash = await run_in_threadpool(sha256_file, dest_path)
+
     # Insert DB record
     db = await get_db()
     try:
         await db.execute(
             """INSERT INTO evidence
-               (id, case_id, file_name, file_type, file_path, file_size, mime_type, status)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, 'PENDING')""",
+               (id, case_id, file_name, file_type, file_path, file_size, mime_type,
+                status, file_hash_sha256)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, 'PENDING', %s)""",
             (
                 evidence_id,
                 case_id,
@@ -173,6 +179,7 @@ async def upload_evidence(
                 str(dest_path),
                 file_size,
                 mime,
+                file_hash,
             ),
         )
         await db.commit()
@@ -184,8 +191,11 @@ async def upload_evidence(
     await write_audit_log(
         action="UPLOAD_EVIDENCE",
         case_id=case_id,
-        metadata={"evidence_id": evidence_id, "file_name": file.filename, "file_type": file_type},
+        metadata={"evidence_id": evidence_id, "file_name": file.filename, "file_type": file_type,
+                  "file_size": file_size},
         ip_address=request.client.host if request.client else None,
+        evidence_id=evidence_id,
+        file_hash_sha256=file_hash,
     )
 
     # Import sio lazily to avoid circular import

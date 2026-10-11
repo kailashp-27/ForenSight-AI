@@ -6,6 +6,7 @@ import {
   FolderOpen,
   FileVideo,
   Shield,
+  ScanSearch,
   Settings,
   Activity,
 } from "lucide-react";
@@ -15,6 +16,7 @@ const navItems = [
   { to: "/",        icon: LayoutDashboard, label: "Dashboard" },
   { to: "/cases",   icon: FolderOpen,      label: "Cases" },
   { to: "/evidence",icon: FileVideo,       label: "Evidence" },
+  { to: "/workbench",icon: ScanSearch,     label: "Workbench" },
 ];
 
 export function Sidebar() {

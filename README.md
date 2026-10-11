@@ -79,3 +79,29 @@ From `frontend/`, use `npm run build` to create the browser bundle.
 ## Interpreting AI output
 
 Transcripts and generated reports need review against the original evidence. The prototype does not establish forensic validity, infer guilt, or replace an investigator's judgment. Its database activity records are ordinary stored records, not a verified immutable audit system.
+
+---
+
+## CCTV Forensic Workbench (ROI inspection)
+
+Open a video evidence item and choose **Open in Forensic Workbench** (or visit `/workbench`).
+
+**Operator flow:** scrub / frame-step (← →) → drag a reticle over a region → **Regional Scan**.
+The backend crops the exact frame region (+10 % context), applies CLAHE + unsharp mask,
+letterboxes to 448×448 and sends it to a **local** vision-language model through Ollama.
+The result is stored as an **Unverified Draft**; an investigator must press
+**Verify & Approve for Report** before it appears in the entity graph / timeline.
+
+| Concern | Implementation |
+|---|---|
+| Air-gap | `vlm_client.py` refuses any non-loopback endpoint |
+| Objective lexicon | `objective_lexicon.py` rewrites "blood" → "red fluid stain", etc.; flag `objective_lexicon_compliant` |
+| Chain of custody | `audit_trail` table: SHA-256 hash chain, append-only triggers, `GET /api/v1/audit/verify` |
+| Raw model output | AES-256-GCM encrypted inside the audit entry (key: `AUDIT_KEY_PATH`) |
+| Human-in-the-loop | edits reset verification; verify/revoke are audited |
+
+**Setup:** `pip install -r requirements.txt`, then `ollama pull qwen2.5vl:7b`
+(override with `OLLAMA_VISION_MODEL`). The Vite dev proxy targets port **8001**
+(`frontend/vite.config.ts`), so run `uvicorn backend.main:socket_app --port 8001`.
+
+**Tests:** `python -m pytest backend/tests -q` (no MySQL or Ollama needed).

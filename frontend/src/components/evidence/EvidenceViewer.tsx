@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   X, Play, Pause, FileText, Download, Copy, Check, Search,
-  Bot, Sparkles, RefreshCw, AlertTriangle, ShieldAlert, Cpu, ExternalLink
+  Bot, Sparkles, RefreshCw, AlertTriangle, ShieldAlert, Cpu, ExternalLink, ScanSearch
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import ReactMarkdown from "react-markdown";
@@ -54,6 +55,7 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
   const [selectedModel, setSelectedModel] = useState("llama3.2:1b");
   const [availableModels, setAvailableModels] = useState<string[]>(["llama3.2:1b"]);
 
+  const navigate = useNavigate();
   const mediaRef = useRef<HTMLMediaElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -273,6 +275,16 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {evidence.file_type === "VIDEO" && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => navigate(`/workbench/${evidenceId}`)}
+                icon={<ScanSearch style={{ width: 14, height: 14 }} />}
+              >
+                Open in Forensic Workbench
+              </Button>
+            )}
             <Button
               size="sm"
               variant="primary"
