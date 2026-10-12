@@ -252,7 +252,27 @@ export interface EvidenceClue {
   }[];
 }
 
+export interface ReviewItem {
+  id: string;
+  evidence_id: string;
+  file_name: string;
+  label: string;
+  class_name: string | null;
+  confidence: number;
+  timestamp_str: string | null;
+  readout_text: string | null;
+  verification_status: string;
+}
+
 export const investigationApi = {
+  reviewQueue: (caseId: string) =>
+    request<{ items: ReviewItem[]; counts: Record<string, number> }>(`/cases/${caseId}/review-queue`),
+  reviewDetection: (id: string, decision: "confirm" | "reject" | "relabel", operatorId: string, className?: string) =>
+    request<{ id: string; decision: string; label: string }>(`/detections/${id}/review`, {
+      method: "POST",
+      body: JSON.stringify({ decision, operator_id: operatorId, class_name: className }),
+    }),
+  cropUrl: (detectionId: string) => `${BASE}/detections/${detectionId}/crop`,
   analyzeCase: (caseId: string) =>
     request<{ status: string; evidence_count: number }>(`/cases/${caseId}/analyze`, { method: "POST" }),
   analyzeEvidence: (id: string) => request<{ status: string }>(`/evidence/${id}/analyze`, { method: "POST" }),

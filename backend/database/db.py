@@ -131,6 +131,8 @@ _COLUMN_MIGRATIONS = [
     ("detections", "verified_by", "VARCHAR(100) NULL"),
     ("detections", "verified_at", "VARCHAR(40) NULL"),
     ("detections", "audit_seq", "BIGINT NULL"),
+    ("detections", "class_name", "VARCHAR(60) NULL"),
+    ("detections", "track_key", "VARCHAR(40) NULL"),
     ("evidence", "latitude", "DOUBLE NULL"),
     ("evidence", "longitude", "DOUBLE NULL"),
     ("evidence", "location_label", "VARCHAR(255) NULL"),

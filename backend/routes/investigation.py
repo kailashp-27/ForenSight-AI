@@ -25,12 +25,17 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
+from typing import Literal
+
+import cv2
 from pydantic import BaseModel, Field
 
 from backend.database.db import get_db
 from backend.modules import audit_engine, auto_analysis, investigation_service as svc
 from backend.modules.report_engine import build_report_html
+from backend.modules.vision import cv_engine
+from backend.modules.vision.objective_lexicon import enforce_objective_lexicon
 
 router = APIRouter()
 
@@ -39,6 +44,12 @@ class LocationBody(BaseModel):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     label: Optional[str] = Field(default=None, max_length=255)
+    operator_id: str = Field(default="OPERATOR", min_length=1, max_length=100)
+
+
+class ReviewBody(BaseModel):
+    decision: Literal["confirm", "reject", "relabel"]
+    class_name: Optional[str] = Field(default=None, min_length=1, max_length=60)
     operator_id: str = Field(default="OPERATOR", min_length=1, max_length=100)
 
 
@@ -209,7 +220,7 @@ async def report(case_id: str, download: bool = Query(False), request: Request =
     for d in ctx["detections"]:
         if d.get("source") == "VLM_ROI":
             findings.append(_row_to_finding(d).model_dump() | {"confidence": d["confidence"]})
-        elif d.get("source") == "AUTO_YOLO":
+        elif d.get("source") == "AUTO_YOLO" and d.get("verification_status") != "Rejected":
             auto.append({"evidence_id": d["evidence_id"], "label": d["label"],
                          "timestamp_str": d.get("timestamp_str"), "confidence": d["confidence"]})
 
@@ -235,3 +246,156 @@ async def report(case_id: str, download: bool = Query(False), request: Request =
         num = (ctx["case"].get("case_number") or case_id).replace("/", "-")
         headers["Content-Disposition"] = f'attachment; filename="ForenSight_Report_{num}.html"'
     return HTMLResponse(content=html_doc, headers=headers)
+
+
+# ── detection review (human-in-the-loop feedback; feeds fine-tuning) ──────────
+
+@router.get("/evidence/{evidence_id}/detections")
+async def list_detections(evidence_id: str, include_rejected: bool = False) -> List[Dict[str, Any]]:
+    db = await get_db()
+    try:
+        cur = await db.execute(
+            """SELECT id, label, class_name, category, confidence, bounding_box, frame_index,
+                      timestamp_str, frame_timestamp, readout_text, verification_status,
+                      verified_by, track_key
+               FROM detections WHERE evidence_id=%s AND source='AUTO_YOLO'
+               ORDER BY frame_timestamp, id""", (evidence_id,))
+        rows = [dict(r) for r in await cur.fetchall()]
+        await db.commit()
+    finally:
+        await db.close()
+    out = []
+    for r in rows:
+        if r["verification_status"] == "Rejected" and not include_rejected:
+            continue
+        try:
+            r["bounding_box"] = json.loads(r["bounding_box"])
+        except (TypeError, json.JSONDecodeError):
+            pass
+        out.append(r)
+    return out
+
+
+@router.get("/detections/{detection_id}/crop")
+async def detection_crop(detection_id: str) -> Response:
+    """JPEG crop of the detected object (10 percent context) for the review UI."""
+    db = await get_db()
+    try:
+        cur = await db.execute(
+            """SELECT d.bounding_box, d.frame_index, e.file_path, e.file_type
+               FROM detections d JOIN evidence e ON e.id=d.evidence_id WHERE d.id=%s""",
+            (detection_id,))
+        row = await cur.fetchone()
+        await db.commit()
+    finally:
+        await db.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Detection not found")
+    try:
+        box = json.loads(row["bounding_box"])
+    except (TypeError, json.JSONDecodeError):
+        raise HTTPException(status_code=422, detail="Detection has no usable box")
+
+    def _render() -> bytes:
+        if row["file_type"] == "IMAGE":
+            frame = cv2.imread(row["file_path"])
+            if frame is None:
+                raise cv_engine.VideoError("Could not decode image")
+        else:
+            frame, _info, _probe = cv_engine.extract_frame(
+                row["file_path"], frame_index=int(row["frame_index"] or 0))
+        h, w = frame.shape[:2]
+        x1, y1, x2, y2 = (float(v) for v in box)
+        px, py = (x2 - x1) * 0.1, (y2 - y1) * 0.1
+        crop = frame[max(0, int((y1 - py) * h)): int((y2 + py) * h),
+                     max(0, int((x1 - px) * w)): int((x2 + px) * w)]
+        if crop.size == 0:
+            raise cv_engine.VideoError("Empty crop")
+        if max(crop.shape[:2]) < 120:
+            scale = 120 / max(crop.shape[:2])
+            crop = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        return buf.tobytes()
+
+    try:
+        data = await run_in_threadpool(_render)
+    except (cv_engine.VideoError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
+
+
+@router.post("/detections/{detection_id}/review")
+async def review_detection(detection_id: str, body: ReviewBody) -> Dict[str, Any]:
+    """Confirm, reject or relabel an automatic detection. Rejected ones leave the clue set."""
+    db = await get_db()
+    try:
+        cur = await db.execute(
+            """SELECT d.*, e.case_id, e.file_hash_sha256 AS ev_hash
+               FROM detections d JOIN evidence e ON e.id=d.evidence_id
+               WHERE d.id=%s AND d.source='AUTO_YOLO'""", (detection_id,))
+        d = await cur.fetchone()
+        if not d:
+            raise HTTPException(status_code=404, detail="Automatic detection not found")
+        d = dict(d)
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        if body.decision == "reject":
+            await db.execute(
+                "UPDATE detections SET verification_status='Rejected', verified_by=%s, verified_at=%s WHERE id=%s",
+                (body.operator_id, now, detection_id))
+            await db.execute("DELETE FROM clues WHERE id=%s", (detection_id,))
+            result_label = d["label"]
+        else:
+            label = d["label"]
+            if body.decision == "relabel":
+                if not body.class_name:
+                    raise HTTPException(status_code=422, detail="class_name is required to relabel")
+                new_class = body.class_name.strip().lower()
+                label, _ = enforce_objective_lexicon(auto_analysis.objective_class_label(new_class))
+                await db.execute(
+                    "UPDATE detections SET class_name=%s, label=%s, category=%s WHERE id=%s",
+                    (new_class, label, auto_analysis.category_for(new_class), detection_id))
+                await db.execute(
+                    "UPDATE clues SET value=%s, norm_value=%s WHERE id=%s",
+                    (label, label.lower(), detection_id))
+            await db.execute(
+                "UPDATE detections SET verification_status='Verified', verified_by=%s, verified_at=%s WHERE id=%s",
+                (body.operator_id, now, detection_id))
+            result_label = label
+        await db.commit()
+    except HTTPException:
+        raise
+    finally:
+        await db.close()
+
+    await audit_engine.append_entry(
+        "DETECTION_REVIEWED", operator_id=body.operator_id, case_id=d["case_id"],
+        evidence_id=d["evidence_id"], file_hash_sha256=d.get("ev_hash"),
+        metadata={"detection_id": detection_id, "decision": body.decision,
+                  "previous_label": d["label"], "new_label": result_label,
+                  "class_name": body.class_name})
+    return {"id": detection_id, "decision": body.decision, "label": result_label}
+
+
+@router.get("/cases/{case_id}/review-queue")
+async def review_queue(case_id: str, limit: int = Query(60, ge=1, le=300)) -> Dict[str, Any]:
+    """Unreviewed automatic detections, lowest confidence first (a human label
+    is worth most where the model is least sure)."""
+    db = await get_db()
+    try:
+        cur = await db.execute(
+            """SELECT d.id, d.evidence_id, e.file_name, d.label, d.class_name, d.confidence,
+                      d.timestamp_str, d.readout_text, d.verification_status
+               FROM detections d JOIN evidence e ON e.id=d.evidence_id
+               WHERE e.case_id=%s AND d.source='AUTO_YOLO' AND d.verification_status='Unverified_Draft'
+               ORDER BY d.confidence ASC LIMIT %s""", (case_id, limit))
+        items = [dict(r) for r in await cur.fetchall()]
+        cur = await db.execute(
+            """SELECT d.verification_status AS s, COUNT(*) AS n FROM detections d
+               JOIN evidence e ON e.id=d.evidence_id
+               WHERE e.case_id=%s AND d.source='AUTO_YOLO' GROUP BY d.verification_status""", (case_id,))
+        counts = {r["s"]: r["n"] for r in await cur.fetchall()}
+        await db.commit()
+    finally:
+        await db.close()
+    return {"items": items, "counts": counts}

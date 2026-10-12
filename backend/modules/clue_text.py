@@ -75,10 +75,17 @@ def _context(text: str, start: int, end: int, radius: int = 40) -> str:
     return re.sub(r"\s+", " ", text[max(0, start - radius): end + radius]).strip()
 
 
+# Characters OCR engines emit for letters in noisy plates ("KL 83 ] 9493" = "...J...").
+# Same length as the input so match spans/contexts stay aligned.
+_SYMBOL_FIX = str.maketrans({"]": "J", "}": "J", "|": "I", "!": "I"})
+
+
 def extract_clues(text: str) -> List[TextClue]:
     """Extract all clues from `text` (deduplicated by kind + normalised value)."""
     if not text or not text.strip():
         return []
+    # Only repair symbols that sit between alphanumerics/spaces inside a token.
+    text = re.sub(r"(?<=[A-Za-z0-9 ])[\]}|!](?=[A-Za-z0-9 ])", lambda m: m.group(0).translate(_SYMBOL_FIX), text)
 
     upper = text.upper()
     claimed: List[tuple] = []

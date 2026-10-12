@@ -131,3 +131,45 @@ Notes:
 - Everything automatic is **unverified**; reports separate verified findings from machine observations. Appearance-only matches are weak and never imply the same object or person.
 - Map tiles need internet unless `VITE_MAP_TILE_URL` points at an on-prem tile server. `VITE_API_TARGET` overrides the Vite proxy target.
 - Tests: `python -m pytest backend/tests -q`.
+
+
+---
+
+## Video analysis v2 (tracking, voting, review loop)
+
+The default video analyser is `backend/modules/video_pipeline.py`:
+
+1. **Detect + track** (YOLOv8 + ByteTrack, ~3 fps). One physical object = one track, so a scene with
+   4 people yields 4 detections, not hundreds of per-frame boxes.
+2. **Open-vocabulary classes** (YOLO-World, no training): `license plate, knife, crowbar, hammer, backpack,
+   duffel bag, helmet, face mask, gloves, gun` (edit `OPEN_VOCAB_CLASSES`). Sharp-edged items are reported
+   as shapes ("knife-shaped metallic object"), never as weapons.
+3. **Best crops**: each track keeps its sharpest/largest crops; class and colour are voted over the track.
+4. **OCR ensemble** (EasyOCR + RapidOCR, GPU when available) on vehicle/plate crops and on the sharpest frames
+   of each 1 s window.
+5. **Plate consolidation**: reads of the same plate are clustered, format-corrected (Indian `LL DD L{1,3} DDDD`
+   and UK formats, valid state codes) and confidence-voted. The clue records the reads it came from.
+
+### Measure it (don't trust it)
+
+```bash
+python -m backend.tools.benchmark_video --clips 16 --seed 21 --image people.jpg
+python -m backend.tools.benchmark_video --clips 16 --seed 5 --hard      # much harsher degradation
+python -m backend.tools.benchmark_video --videos DIR --truth truth.json # YOUR labelled clips
+```
+
+Synthetic clips only approximate real CCTV: use your own labelled footage for real numbers.
+
+### Review -> fine-tune loop
+
+Investigation board -> **Review detections**: confirm / reject / relabel. Rejected items leave the clue set and
+report. Decisions are the training labels:
+
+```bash
+python -m backend.training.cli export --out data/yolo_case --case <case_id>
+python -m backend.training.cli train  --data data/yolo_case/data.yaml --epochs 40
+# then set YOLO_MODEL=<printed path> in .env and restart; re-run the benchmark before switching
+```
+
+Fine-tuning needs hundreds of reviewed boxes covering ALL classes you care about; a narrow dataset makes the
+model forget the rest. First run downloads: yolov8s (22 MB), YOLO-World (~50 MB) and CLIP (~340 MB), then offline.

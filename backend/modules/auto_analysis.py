@@ -66,6 +66,27 @@ def _get_detector():
     return _detector
 
 
+_rapid = None
+
+
+def _get_rapid():
+    """Second, independent OCR engine (RapidOCR / ONNX) for ensemble voting."""
+    global _rapid
+    if not settings.OCR_ENSEMBLE:
+        return None
+    if _rapid is None:
+        with _lock:
+            if _rapid is None:
+                try:
+                    from rapidocr_onnxruntime import RapidOCR
+                    _rapid = RapidOCR()
+                except Exception as exc:
+                    _load_errors["ocr_ensemble"] = str(exc)
+                    logger.warning("RapidOCR unavailable: %s", exc)
+                    _rapid = False
+    return _rapid or None
+
+
 def _get_ocr():
     global _ocr
     if _ocr is None:
@@ -73,7 +94,9 @@ def _get_ocr():
             if _ocr is None:
                 try:
                     import easyocr
-                    _ocr = easyocr.Reader(["en"], gpu=False, verbose=False)
+                    import torch
+                    _ocr = easyocr.Reader(["en"], gpu=bool(torch.cuda.is_available() and settings.USE_GPU),
+                                          verbose=False)
                 except Exception as exc:
                     _load_errors["ocr"] = str(exc)
                     logger.warning("EasyOCR unavailable: %s", exc)
@@ -81,11 +104,39 @@ def _get_ocr():
     return _ocr
 
 
+_world = None
+
+
+def _get_world():
+    """YOLO-World open-vocabulary detector (custom class names, no training)."""
+    global _world
+    if not settings.OPEN_VOCAB_ENABLED:
+        return None
+    if _world is None:
+        with _lock:
+            if _world is None:
+                try:
+                    from ultralytics import YOLOWorld
+                    Path(settings.OPEN_VOCAB_MODEL).parent.mkdir(parents=True, exist_ok=True)
+                    w = YOLOWorld(settings.OPEN_VOCAB_MODEL)
+                    w.set_classes([c.strip() for c in settings.OPEN_VOCAB_CLASSES.split(",") if c.strip()])
+                    _world = w
+                except Exception as exc:
+                    _load_errors["open_vocab"] = str(exc)
+                    logger.warning("Open-vocabulary detector unavailable: %s", exc)
+                    _world = False
+    return _world or None
+
+
 def capabilities() -> Dict[str, Any]:
     """Report which analysers can run (loads them if needed)."""
     return {
         "detector": _get_detector() is not None,
         "ocr": _get_ocr() is not None,
+        "open_vocab": _get_world() is not None,
+        "ocr_ensemble": _get_rapid() is not None,
+        "gpu": bool(__import__("torch").cuda.is_available() and settings.USE_GPU),
+        "open_vocab_classes": [c.strip() for c in settings.OPEN_VOCAB_CLASSES.split(",") if c.strip()],
         "detector_model": settings.YOLO_MODEL,
         "errors": dict(_load_errors),
         "note": "Pre-trained YOLOv8 (COCO) and EasyOCR checkpoints; not fine-tuned on forensic data.",
@@ -131,6 +182,7 @@ class FrameText:
     conf: float
     bbox_px: List[int]
     from_vehicle: bool
+    engine: str = "easyocr"
 
 
 def _enhance_for_ocr(bgr: np.ndarray) -> np.ndarray:
@@ -151,17 +203,29 @@ def _run_ocr(img: np.ndarray, offset: Tuple[int, int] = (0, 0), scale: float = 1
     except Exception as exc:
         logger.warning("OCR failed: %s", exc)
         return []
-    for box, text, conf in results:
+    def add(box, text, conf, engine):
         text = (text or "").strip()
         if not text or conf < MIN_OCR_CONF:
-            continue
+            return
         xs = [p[0] for p in box]
         ys = [p[1] for p in box]
         out.append(FrameText(
-            text=text, conf=float(conf), from_vehicle=from_vehicle,
+            text=text, conf=float(conf), from_vehicle=from_vehicle, engine=engine,
             bbox_px=[int(min(xs) / scale + offset[0]), int(min(ys) / scale + offset[1]),
                      int(max(xs) / scale + offset[0]), int(max(ys) / scale + offset[1])],
         ))
+
+    for box, text, conf in results:
+        add(box, text, conf, "easyocr")
+
+    rapid = _get_rapid()
+    if rapid is not None:
+        try:
+            res, _ = rapid(_enhance_for_ocr(img))
+            for box, text, conf in (res or []):
+                add(box, text, float(conf), "rapidocr")
+        except Exception as exc:
+            logger.warning("RapidOCR failed: %s", exc)
     return out
 
 
@@ -227,6 +291,37 @@ class TextSighting:
 
 
 @dataclass
+class TrackSummary:
+    """One physical object followed across frames (a tracked instance)."""
+    key: str
+    cls: str
+    color: str
+    source: str                 # "coco" | "openvocab"
+    first_ms: int
+    last_ms: int
+    frames: int
+    max_conf: float
+    best_frame: int
+    best_bbox_rel: List[float]
+    plate: Optional[str] = None
+
+
+@dataclass
+class PlateFinding:
+    """A number plate consolidated from many reads (voted + format-corrected)."""
+    text: str
+    confidence: float
+    n_reads: int
+    agreement: float
+    edits: int
+    state_valid: Optional[bool]
+    first_ms: int
+    bbox_rel: Optional[List[float]]
+    reads: List[Tuple[str, float]] = field(default_factory=list)
+    track_keys: List[str] = field(default_factory=list)
+
+
+@dataclass
 class AnalysisResult:
     kind: str                                   # VIDEO | IMAGE | DOCUMENT
     segments: List[ObjectSegment] = field(default_factory=list)
@@ -236,6 +331,9 @@ class AnalysisResult:
     frames_analyzed: int = 0
     duration_ms: int = 0
     warnings: List[str] = field(default_factory=list)
+    tracks: List[TrackSummary] = field(default_factory=list)
+    plates: List[PlateFinding] = field(default_factory=list)
+    method: str = "legacy"
 
 
 def _rel(bbox: List[int], w: int, h: int) -> List[float]:
@@ -244,8 +342,9 @@ def _rel(bbox: List[int], w: int, h: int) -> List[float]:
 
 # ── video ────────────────────────────────────────────────────────────────────
 
-def analyze_video(path: str | Path,
-                  progress: Optional[Callable[[int, int], None]] = None) -> AnalysisResult:
+def analyze_video_legacy(path: str | Path,
+                         progress: Optional[Callable[[int, int], None]] = None) -> AnalysisResult:
+    """Original fixed-interval sampler: per-frame detection + OCR, no tracking (benchmark baseline)."""
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         raise RuntimeError("OpenCV could not open the video")
@@ -303,6 +402,13 @@ def analyze_video(path: str | Path,
         return result
     finally:
         cap.release()
+
+
+def analyze_video(path: str | Path,
+                  progress: Optional[Callable[[int, int], None]] = None) -> AnalysisResult:
+    """Default video analysis: detect -> track -> best crops -> plate voting."""
+    from backend.modules import video_pipeline
+    return video_pipeline.analyze_video(path, progress)
 
 
 # ── image ────────────────────────────────────────────────────────────────────
@@ -377,6 +483,22 @@ def analyze_pdf(path: str | Path) -> AnalysisResult:
         if not result.pages:
             result.warnings.append("No extractable text layer (scanned PDF?); OCR of PDF pages not performed.")
     return result
+
+
+# Detector class names that read as conclusory are reported as shapes, never as
+# "weapon": the project's objective-lexicon rule applies to model labels too.
+_OBJECTIVE_CLASS = {
+    "knife": "knife-shaped metallic object",
+    "scissors": "scissor-shaped metallic object",
+    "gun": "handgun-shaped object",
+    "baseball bat": "bat-shaped object",
+    "crowbar": "crowbar-shaped metallic object",
+    "hammer": "hammer-shaped object",
+}
+
+
+def objective_class_label(cls: str) -> str:
+    return _OBJECTIVE_CLASS.get(cls, cls)
 
 
 def category_for(cls: str) -> str:

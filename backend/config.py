@@ -46,9 +46,28 @@ class Settings(BaseSettings):
 
     # ── Automatic analysis (YOLO + OCR) ────────────────────────────────────────
     # Pre-trained COCO weights; downloaded once, then fully offline.
-    YOLO_MODEL: str = "backend/storage/models/yolov8n.pt"
-    AUTO_SAMPLE_INTERVAL_S: float = 1.0   # video sampling period (stretched for long clips)
-    AUTO_MAX_FRAMES: int = 90             # hard cap on analysed frames per video
+    YOLO_MODEL: str = "backend/storage/models/yolov8s.pt"
+    AUTO_SAMPLE_INTERVAL_S: float = 1.0   # legacy fixed-interval sampler (benchmark baseline)
+    AUTO_MAX_FRAMES: int = 90             # legacy sampler frame cap
+
+    # Tracking pipeline (default for video)
+    AUTO_DETECT_FPS: float = 3.0          # detection+tracking rate (frames per second of video)
+    AUTO_MAX_DETECT_FRAMES: int = 450     # cap on detected frames per video (stride stretches)
+    AUTO_IMGSZ: int = 960                 # inference size; larger finds smaller objects
+    AUTO_MIN_TRACK_FRAMES: int = 2        # tracks shorter than this are treated as flicker
+    AUTO_CROPS_PER_TRACK: int = 5         # sharpest/largest crops kept per track for OCR
+    AUTO_SCENE_OCR_INTERVAL_S: float = 1.0
+    AUTO_SCENE_OCR_MAX: int = 90
+    AUTO_SCENE_FRAMES_PER_WINDOW: int = 2   # sharpest N frames OCR'd per window
+    USE_GPU: bool = True                  # use CUDA when available
+    OCR_ENSEMBLE: bool = True             # second OCR engine (RapidOCR) votes with EasyOCR
+    AUTO_MAX_PLATE_OCR: int = 60          # cap on OCR calls over vehicle/plate crops
+
+    # Open-vocabulary detector (YOLO-World): extra forensic classes with NO training.
+    OPEN_VOCAB_ENABLED: bool = True
+    OPEN_VOCAB_MODEL: str = "backend/storage/models/yolov8s-worldv2.pt"
+    OPEN_VOCAB_CLASSES: str = "license plate,knife,crowbar,hammer,backpack,duffel bag,helmet,face mask,gloves,gun"
+    OPEN_VOCAB_CONF: float = 0.30
 
     # ── Chain of custody ───────────────────────────────────────────────────────
     # AES-256-GCM key used to encrypt raw VLM payloads stored in audit_trail.

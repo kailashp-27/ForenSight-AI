@@ -25,6 +25,7 @@ from fastapi.concurrency import run_in_threadpool
 from backend.modules import audit_engine, auto_analysis
 from backend.modules.clue_text import extract_clues, normalize
 from backend.modules.correlation_engine import correlate
+from backend.modules.plate_postprocess import parse_plate
 from backend.modules.vision.cv_engine import format_timestamp
 from backend.modules.vision.objective_lexicon import enforce_objective_lexicon
 
@@ -47,15 +48,26 @@ def _fmt_ts(ms: Optional[int]) -> str:
 # ── persistence helpers ──────────────────────────────────────────────────────
 
 async def _insert_clue(db, case_id, evidence_id, kind, value, norm, conf, source,
-                       ts_ms=None, bbox=None, context=None) -> None:
+                       ts_ms=None, bbox=None, context=None, clue_id=None) -> None:
     await db.execute(
         """INSERT INTO clues
            (id, case_id, evidence_id, kind, value, norm_value, confidence, source,
             timestamp_ms, bbox, context)
            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-        (_uid(), case_id, evidence_id, kind, str(value)[:500], str(norm)[:500], float(conf),
+        (clue_id or _uid(), case_id, evidence_id, kind, str(value)[:500], str(norm)[:500], float(conf),
          source, ts_ms, json.dumps(bbox) if bbox else None, (context or "")[:1000] or None),
     )
+
+
+def _fix_plate(kind: str, value: str, norm: str, context: str):
+    """Format-correct a PLATE reading (O/0, B/8 ...) and note the original read."""
+    if kind != "PLATE":
+        return value, norm, context
+    p = parse_plate(norm)
+    if p.pattern == "RAW" or p.text == norm:
+        return value, norm, context
+    note = f"{context} [format-corrected from read '{norm}', {p.edits} edit(s)]"
+    return p.text, p.text, note
 
 
 def _text_clues_from_sightings(texts) -> List[Dict[str, Any]]:
@@ -168,8 +180,47 @@ async def _persist(ev: Dict[str, Any], result) -> Dict[str, int]:
         await db.execute("DELETE FROM detections WHERE evidence_id=%s AND source='AUTO_YOLO'", (evidence_id,))
 
         if result is not None:
+            # Tracking pipeline: one detection + one clue per tracked object,
+            # one PLATE clue per voted plate.
+            for tr in result.tracks:
+                det_id = _uid()
+                cls_label = auto_analysis.objective_class_label(tr.cls)
+                label, _ = enforce_objective_lexicon(f"{tr.color} {cls_label}".strip()
+                                                     if tr.color != "unknown" else cls_label)
+                details = [f"tracked across {tr.frames} detection frame(s)",
+                           f"from {_fmt_ts(tr.first_ms)} to {_fmt_ts(tr.last_ms)}",
+                           f"detector: {tr.source}"]
+                if tr.plate:
+                    details.append(f"plate read: {tr.plate}")
+                await db.execute(
+                    """INSERT INTO detections
+                       (id, evidence_id, label, confidence, bounding_box, frame_timestamp,
+                        source, category, readout_text, details_json, lexicon_compliant,
+                        frame_index, timestamp_str, operator_id, verification_status,
+                        class_name, track_key)
+                       VALUES (%s,%s,%s,%s,%s,%s,'AUTO_YOLO',%s,%s,%s,1,%s,%s,'AUTO','Unverified_Draft',%s,%s)""",
+                    (det_id, evidence_id, label, tr.max_conf, json.dumps(tr.best_bbox_rel),
+                     tr.first_ms / 1000.0, auto_analysis.category_for(tr.cls), tr.plate or "NONE",
+                     json.dumps(details[:3]), tr.best_frame, _fmt_ts(tr.first_ms), tr.cls, tr.key),
+                )
+                await _insert_clue(db, case_id, evidence_id, "OBJECT", label, label.lower(),
+                                   tr.max_conf, "AUTO_YOLO", tr.first_ms, tr.best_bbox_rel,
+                                   f"{tr.cls} tracked for {tr.frames} frame(s), "
+                                   f"{_fmt_ts(tr.first_ms)}-{_fmt_ts(tr.last_ms)}", clue_id=det_id)
+                counts["objects"] += 1
+
+            for pl in result.plates:
+                reads = ", ".join(f"{t}({c:.2f})" for t, c in pl.reads[:6])
+                note = (f"voted from {pl.n_reads} read(s), agreement {pl.agreement:.0%}"
+                        + (f", {pl.edits} format correction(s)" if pl.edits else "")
+                        + (", state code NOT recognised" if pl.state_valid is False else "")
+                        + f"; reads: {reads}")
+                await _insert_clue(db, case_id, evidence_id, "PLATE", pl.text, pl.text,
+                                   pl.confidence, "AUTO_OCR", pl.first_ms, pl.bbox_rel, note)
+                counts["text_clues"] += 1
+
             # Objects → unverified detections + appearance clues
-            for seg in result.segments:
+            for seg in (result.segments if not result.tracks else []):
                 label, _ = enforce_objective_lexicon(f"{seg.color} {seg.cls}".strip())
                 await db.execute(
                     """INSERT INTO detections
@@ -190,7 +241,11 @@ async def _persist(ev: Dict[str, Any], result) -> Dict[str, int]:
                                    f"{seg.cls} detected in {seg.count} sampled frame(s)")
                 counts["objects"] += 1
 
+            voted = result.method == "tracking+voting"
             for c in _text_clues_from_sightings(result.texts):
+                c["value"], c["norm"], c["context"] = _fix_plate(c["kind"], c["value"], c["norm"], c["context"])
+                if voted and c["kind"] == "PLATE":
+                    continue   # plates come from the consolidated, voted readings
                 await _insert_clue(db, case_id, evidence_id, c["kind"], c["value"], c["norm"],
                                    c["conf"], "AUTO_OCR",
                                    None if result.kind == "IMAGE" else c["ts_ms"], c["bbox"],
@@ -207,8 +262,9 @@ async def _persist(ev: Dict[str, Any], result) -> Dict[str, int]:
                         (_uid(), evidence_id, i, text[:20000], page_no))
                     counts["document_pages"] += 1
                     for c in extract_clues(text):
-                        await _insert_clue(db, case_id, evidence_id, c.kind, c.value, c.norm,
-                                           0.9, "DOCUMENT", None, None, f"page {page_no}: {c.context}")
+                        val, nrm, ctx = _fix_plate(c.kind, c.value, c.norm, f"page {page_no}: {c.context}")
+                        await _insert_clue(db, case_id, evidence_id, c.kind, val, nrm,
+                                           0.9, "DOCUMENT", None, None, ctx)
                         counts["text_clues"] += 1
 
             # EXIF location / capture time (never overwrite a manually set location)

@@ -5,18 +5,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  ArrowLeft, Download, FileText, Link2, Loader2, MapPin, Network, Play, Printer, Sparkles,
+  ArrowLeft, Download, FileText, GraduationCap, Link2, Loader2, MapPin, Network, Play, Printer, Sparkles,
 } from "lucide-react";
 import { casesApi, type Case } from "../services/api";
 import {
   investigationApi, type AnalysisStatus, type CaseGraph, type CaseMapData, type ClueMatch, type Correlations,
 } from "../services/forensicApi";
 import { ClueMatches } from "../components/investigation/ClueMatches";
+import { ReviewQueue } from "../components/investigation/ReviewQueue";
 import { CaseMap } from "../components/investigation/CaseMap";
 import { EntityGraph } from "../components/cctv/EntityGraph";
 import { AiDisclaimerBanner } from "../components/ai/AiDisclaimerBanner";
 
-type Tab = "matches" | "map" | "graph" | "report";
+type Tab = "matches" | "review" | "map" | "graph" | "report";
 
 const STATUS_COLOR: Record<string, string> = {
   COMPLETED: "#10b981", PARTIAL: "#f59e0b", RUNNING: "#3b82f6", FAILED: "#ef4444", NOT_RUN: "#64748b",
@@ -211,6 +212,7 @@ export function Investigation() {
 
       <div style={{ padding: "0.75rem 1.25rem", display: "flex", gap: 4 }} role="tablist">
         {tabBtn("matches", "Matching clues", <Link2 size={14} />, (totals?.strong ?? 0) + (totals?.medium ?? 0))}
+        {tabBtn("review", "Review detections", <GraduationCap size={14} />)}
         {tabBtn("map", "Map", <MapPin size={14} />, map?.points.length)}
         {tabBtn("graph", "Graph", <Network size={14} />)}
         {tabBtn("report", "Report", <FileText size={14} />)}
@@ -224,6 +226,10 @@ export function Investigation() {
             onHighlight={setHighlight}
             onOpenMember={openMember}
           />
+        )}
+
+        {tab === "review" && caseId && (
+          <ReviewQueue caseId={caseId} operatorId={localStorage.getItem("forensight.operatorId") || "OPERATOR-1"} onChanged={() => void loadViews()} />
         )}
 
         {tab === "map" && (
