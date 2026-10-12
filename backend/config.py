@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     VLM_TIMEOUT_S: float = 180.0
     VLM_MAX_TOKENS: int = 250
 
+    # ── Automatic analysis (YOLO + OCR) ────────────────────────────────────────
+    # Pre-trained COCO weights; downloaded once, then fully offline.
+    YOLO_MODEL: str = "backend/storage/models/yolov8n.pt"
+    AUTO_SAMPLE_INTERVAL_S: float = 1.0   # video sampling period (stretched for long clips)
+    AUTO_MAX_FRAMES: int = 90             # hard cap on analysed frames per video
+
     # ── Chain of custody ───────────────────────────────────────────────────────
     # AES-256-GCM key used to encrypt raw VLM payloads stored in audit_trail.
     # Auto-generated on first run. Back it up: losing it makes stored payloads

@@ -10,6 +10,7 @@ import { CaseDetail } from "./pages/CaseDetail";
 import { EvidenceBrowser } from "./pages/EvidenceBrowser";
 import { Settings } from "./pages/Settings";
 import { Workbench } from "./pages/Workbench";
+import { Investigation } from "./pages/Investigation";
 
 function PlaceholderPage({ title, subtitle }: { title: string; subtitle: string }) {
   return (
@@ -69,6 +70,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/cases"     element={<Cases />} />
           <Route path="/cases/new" element={<Cases />} />
           <Route path="/cases/:id" element={<CaseDetail />} />
+          <Route path="/cases/:id/investigation" element={<Investigation />} />
           <Route path="/evidence"  element={<EvidenceBrowser />} />
           <Route path="/workbench" element={<Workbench />} />
           <Route path="/workbench/:evidenceId" element={<Workbench />} />

@@ -16,6 +16,14 @@ opencv-python-headless>=4.9   # frame extraction, CLAHE, unsharp mask, letterbox
 numpy>=1.26
 httpx>=0.27                   # async client for the local Ollama VLM
 
+# ─── Automatic evidence analysis (objects, OCR, documents, correlation) ──────
+ultralytics>=8.3             # YOLOv8 object detection (pre-trained COCO weights)
+easyocr>=1.7                 # OCR for plates / on-screen text
+pymupdf>=1.24                # PDF text extraction
+rapidfuzz>=3.6               # fuzzy clue matching
+Pillow>=10.0                 # EXIF GPS / capture time
+pytest>=8.0                  # backend tests
+
 # ─── Configuration & Utilities ────────────────────────────────────────────────
 pydantic-settings==2.6.1        # Typed settings management via .env
 python-dotenv==1.0.1

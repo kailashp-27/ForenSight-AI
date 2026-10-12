@@ -131,7 +131,36 @@ _COLUMN_MIGRATIONS = [
     ("detections", "verified_by", "VARCHAR(100) NULL"),
     ("detections", "verified_at", "VARCHAR(40) NULL"),
     ("detections", "audit_seq", "BIGINT NULL"),
+    ("evidence", "latitude", "DOUBLE NULL"),
+    ("evidence", "longitude", "DOUBLE NULL"),
+    ("evidence", "location_label", "VARCHAR(255) NULL"),
+    ("evidence", "captured_at", "VARCHAR(40) NULL"),
+    ("evidence", "analysis_status", "VARCHAR(30) NOT NULL DEFAULT 'NOT_RUN'"),
+    ("evidence", "analysis_message", "TEXT NULL"),
+    ("evidence", "analysis_progress", "INT NOT NULL DEFAULT 0"),
 ]
+
+# Observable tokens (plates, phones, objects …) extracted automatically from
+# evidence; the raw material for cross-evidence correlation.
+CLUES_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS clues (
+        id           VARCHAR(64) PRIMARY KEY,
+        case_id      VARCHAR(255) NOT NULL,
+        evidence_id  VARCHAR(255) NOT NULL,
+        kind         VARCHAR(20)  NOT NULL,
+        value        VARCHAR(500) NOT NULL,
+        norm_value   VARCHAR(500) NOT NULL,
+        confidence   FLOAT NOT NULL DEFAULT 0,
+        source       VARCHAR(30)  NOT NULL,
+        timestamp_ms BIGINT NULL,
+        bbox         VARCHAR(100) NULL,
+        context      TEXT NULL,
+        created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_clues_case (case_id),
+        INDEX idx_clues_evidence (evidence_id),
+        FOREIGN KEY (evidence_id) REFERENCES evidence(id) ON DELETE CASCADE
+    );
+"""
 
 
 async def _ensure_columns(cur) -> None:
@@ -161,6 +190,7 @@ async def init_db() -> None:
             # Additive migrations for databases created before the forensic
             # ROI-inspection feature (CREATE TABLE IF NOT EXISTS won't add columns).
             await _ensure_columns(cur)
+            await cur.execute(CLUES_TABLE_SQL)
             # Hash-chained, append-only chain-of-custody log.
             from backend.modules import audit_engine
             await audit_engine.ensure_schema(cur)

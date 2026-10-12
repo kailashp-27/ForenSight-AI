@@ -4,7 +4,7 @@
 // of findings so that verifying a draft updates every view.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { FileVideo, Fingerprint, Loader2, Network, ShieldCheck, ShieldAlert, GitCommitHorizontal } from "lucide-react";
 import { evidenceApi, type Evidence } from "../services/api";
 import {
@@ -86,6 +86,7 @@ export function Workbench() {
 
 function WorkbenchForClip({ evidenceId }: { evidenceId: string }) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const playerRef = useRef<VideoPlayerHandle>(null);
 
   const [evidence, setEvidence] = useState<Evidence | null>(null);
@@ -206,6 +207,16 @@ function WorkbenchForClip({ evidenceId }: { evidenceId: string }) {
   };
 
   const seekTo = (ms: number) => playerRef.current?.seekToMs(ms);
+
+  // Deep link from a clue match: /workbench/<id>?t=<ms>
+  const deepLinkMs = searchParams.get("t");
+  useEffect(() => {
+    if (!meta || deepLinkMs === null) return;
+    const ms = Number(deepLinkMs);
+    if (!Number.isFinite(ms)) return;
+    const id = window.setTimeout(() => playerRef.current?.seekToMs(ms), 400);
+    return () => window.clearTimeout(id);
+  }, [meta, deepLinkMs]);
 
   if (loadError) {
     return (

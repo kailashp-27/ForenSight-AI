@@ -70,8 +70,6 @@ async def _process_evidence(evidence_id: str, file_path: str, file_type: str, si
             "message": "Processing started...",
         })
 
-        # TODO Phase 1: await run_yolov8_detection(evidence_id, file_path)
-        
         # Phase 2: Whisper Transcription for Audio/Video
         if file_type in ("AUDIO", "VIDEO"):
             await sio.emit("evidence:status_update", {
@@ -85,6 +83,19 @@ async def _process_evidence(evidence_id: str, file_path: str, file_type: str, si
             except Exception as e:
                 # Log but do not fail the whole process if transcription fails
                 print(f"Whisper transcription failed: {e}")
+
+        # Automatic clue extraction (YOLO + OCR + EXIF + transcript/PDF text).
+        # Runs after Whisper so transcript clues are included. A failure here
+        # is recorded on the evidence row and must not fail ingestion.
+        await sio.emit("evidence:status_update", {
+            "evidence_id": evidence_id, "status": "PROCESSING", "progress": 60,
+            "message": "Extracting clues (objects, text, metadata)...",
+        })
+        try:
+            from backend.modules import investigation_service
+            await investigation_service.analyze_evidence(evidence_id)
+        except Exception as e:
+            print(f"Automatic analysis failed: {e}")
 
         # Finalize processing
         await db.execute(

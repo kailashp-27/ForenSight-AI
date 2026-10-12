@@ -105,3 +105,29 @@ The result is stored as an **Unverified Draft**; an investigator must press
 (`frontend/vite.config.ts`), so run `uvicorn backend.main:socket_app --port 8001`.
 
 **Tests:** `python -m pytest backend/tests -q` (no MySQL or Ollama needed).
+
+
+---
+
+## Automatic investigation board
+
+Open a case and choose **Investigation board** (`/cases/<id>/investigation`), then **Run automatic analysis**.
+Uploads are also analysed automatically after ingestion.
+
+| Evidence | What is extracted automatically |
+|---|---|
+| Video | frames sampled across the whole clip -> YOLOv8 objects (+ colour), EasyOCR on vehicle crops and full frames |
+| Image | YOLOv8 objects, EasyOCR text, EXIF GPS + capture time |
+| PDF / transcript | text per page / segment -> plates, phones, e-mails, amounts, alphanumeric IDs |
+
+Clues that appear in **two or more** evidence items are linked and explained
+(`EXACT`, `OCR_VARIANT`, `FUZZY`, weak `APPEARANCE`). The board shows the matches,
+a map (EXIF GPS or manual location), an evidence<->clue graph and a printable HTML
+report (Download / Print to PDF). Open any file's **Clues** tab to see which of its
+clues also occur elsewhere; matching boxes are highlighted on images.
+
+Notes:
+- YOLOv8n and EasyOCR are **pre-trained** checkpoints (COCO / English); they are not fine-tuned on forensic data. Weights download once to `backend/storage/models/`.
+- Everything automatic is **unverified**; reports separate verified findings from machine observations. Appearance-only matches are weak and never imply the same object or person.
+- Map tiles need internet unless `VITE_MAP_TILE_URL` points at an on-prem tile server. `VITE_API_TARGET` overrides the Vite proxy target.
+- Tests: `python -m pytest backend/tests -q`.

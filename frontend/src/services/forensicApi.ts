@@ -163,3 +163,114 @@ export const forensicApi = {
 
   verifyChain: () => request<ChainReport>("/audit/verify"),
 };
+
+// ── Investigation (automatic analysis, correlation, map, report) ─────────────
+
+export type MatchStrength = "STRONG" | "MEDIUM" | "WEAK";
+
+export interface MatchMember {
+  clue_id: string;
+  evidence_id: string;
+  file_name: string;
+  file_type: string | null;
+  value: string;
+  source: string | null;
+  timestamp_ms: number | null;
+  timestamp_str: string | null;
+  confidence: number;
+  context: string | null;
+  bbox: number[] | null;
+  verified: boolean;
+}
+
+export interface ClueMatch {
+  id: string;
+  kind: string;
+  match_type: "EXACT" | "OCR_VARIANT" | "FUZZY" | "APPEARANCE";
+  value: string;
+  score: number;
+  strength: MatchStrength;
+  evidence_ids: string[];
+  occurrences: number;
+  explanation: string;
+  verified: boolean;
+  needs_review: boolean;
+  members: MatchMember[];
+}
+
+export interface Correlations {
+  matches: ClueMatch[];
+  totals: { clues: number; matches: number; strong: number; medium: number; weak: number; evidence: number };
+}
+
+export interface AnalysisStatus {
+  running: boolean;
+  items: {
+    evidence_id: string;
+    file_name: string;
+    file_type: string;
+    status: "NOT_RUN" | "RUNNING" | "COMPLETED" | "PARTIAL" | "FAILED";
+    progress: number;
+    message: string | null;
+  }[];
+}
+
+export interface MapPoint {
+  evidence_id: string;
+  file_name: string;
+  file_type: string;
+  latitude: number | null;
+  longitude: number | null;
+  label: string | null;
+  captured_at: string | null;
+  match_ids: string[];
+}
+
+export interface CaseMapData {
+  points: MapPoint[];
+  unlocated: MapPoint[];
+  links: { from: string; to: string; match_id: string; value: string; kind: string; strength: MatchStrength }[];
+}
+
+export interface EvidenceClue {
+  id: string;
+  evidence_id: string;
+  kind: string;
+  value: string;
+  confidence: number;
+  source: string;
+  timestamp_ms: number | null;
+  bbox: number[] | string | null; // [x1,y1,x2,y2] relative 0-1 (list, or a JSON string)
+  context: string | null;
+  matches: {
+    match_id: string;
+    strength: MatchStrength;
+    match_type: string;
+    score: number;
+    explanation: string;
+    also_in: MatchMember[];
+  }[];
+}
+
+export const investigationApi = {
+  analyzeCase: (caseId: string) =>
+    request<{ status: string; evidence_count: number }>(`/cases/${caseId}/analyze`, { method: "POST" }),
+  analyzeEvidence: (id: string) => request<{ status: string }>(`/evidence/${id}/analyze`, { method: "POST" }),
+  status: (caseId: string) => request<AnalysisStatus>(`/cases/${caseId}/analysis-status`),
+  correlations: (caseId: string) => request<Correlations>(`/cases/${caseId}/correlations`),
+  clueGraph: (caseId: string, includeWeak = false) =>
+    request<CaseGraph>(`/cases/${caseId}/clue-graph?include_weak=${includeWeak}`),
+  map: (caseId: string) => request<CaseMapData>(`/cases/${caseId}/map`),
+  setLocation: (evidenceId: string, latitude: number, longitude: number, label?: string) =>
+    request<unknown>(`/evidence/${evidenceId}/location`, {
+      method: "PUT",
+      body: JSON.stringify({ latitude, longitude, label }),
+    }),
+  evidenceClues: (evidenceId: string) =>
+    request<{ clues: EvidenceClue[]; matched_count: number }>(`/evidence/${evidenceId}/clues`),
+  capabilities: () =>
+    request<{ detector: boolean; ocr: boolean; detector_model: string; errors: Record<string, string> }>(
+      "/capabilities"
+    ),
+  reportUrl: (caseId: string, download = false) => `${BASE}/cases/${caseId}/report?download=${download}`,
+};
