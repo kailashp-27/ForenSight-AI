@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 from fastapi.concurrency import run_in_threadpool
 
 from backend.modules import audit_engine, auto_analysis
-from backend.modules.clue_terms import extract_terms
+from backend.modules.clue_terms import extract_all_terms, extract_terms
 from backend.modules.clue_text import extract_clues, normalize
 from backend.modules.correlation_engine import correlate
 from backend.modules.plate_postprocess import parse_plate
@@ -349,7 +349,7 @@ def _chunk_source(source_type: Optional[str]) -> str:
 
 def chunk_terms(content: str):
     """Every clue (patterns + names + object phrases) found in one text chunk."""
-    return extract_clues(content or "") + extract_terms(content or "")
+    return extract_clues(content or "") + extract_all_terms(content or "")
 
 
 def _clue_dicts(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -396,7 +396,8 @@ def _clue_dicts(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
                  "kind": c.kind, "value": value, "norm_value": norm,
                  "confidence": 0.9 if source == "DOCUMENT" else 0.6, "source": source,
                  "timestamp_ms": ts, "context": where + context, "bbox": None,
-                 "verified": False, "chunk_id": ch["id"], "_n": 1}
+                 "verified": False, "chunk_id": ch["id"], "_n": 1,
+                 "weight": float(getattr(c, "weight", 1.0))}
             seen[key] = d
             out.append(d)
     for d in seen.values():
@@ -441,14 +442,14 @@ def _clue_dicts(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
         # Names / object phrases in the model's notes. The label is already an
         # OBJECT clue above, so from the label only NAMES are taken (no duplicate).
         terms = [c for c in extract_terms(label) if c.kind == "NAME"]
-        terms += extract_terms(" . ".join(details))
+        terms += extract_all_terms(" . ".join(details))
         seen_terms = set()
         for c in terms:
             if (c.kind, c.norm) in seen_terms:
                 continue
             seen_terms.add((c.kind, c.norm))
             out.append({**base, "id": f"roi:{d['id']}:{c.kind}:{c.norm}", "kind": c.kind,
-                        "value": c.value, "norm_value": c.norm,
+                        "value": c.value, "norm_value": c.norm, "weight": float(getattr(c, "weight", 1.0)),
                         "context": f"Regional scan note: {c.context}"})
 
     # de-duplicate ids, drop person-appearance objects

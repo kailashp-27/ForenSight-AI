@@ -37,3 +37,4 @@ openai-whisper      # Audio transcription – Phase 2
 # sentence-transformers  # Embedding model – Phase 3
 rapidocr-onnxruntime>=1.3    # second OCR engine (ensemble voting with EasyOCR)
 # YOLO-World (open-vocabulary detector) pulls OpenAI CLIP on first use via ultralytics
+wordfreq>=3.1               # filters filler words when turning text into keyword clues

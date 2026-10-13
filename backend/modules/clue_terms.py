@@ -23,7 +23,7 @@ names are therefore never rated STRONG on their own.
 from __future__ import annotations
 
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from backend.modules.clue_text import TextClue, _context
 
@@ -151,3 +151,148 @@ def extract_terms(text: str) -> List[TextClue]:
         found.setdefault(("NAME", norm), TextClue("NAME", name, norm, "proper_noun", s, e, _context(text, s, e)))
 
     return sorted(found.values(), key=lambda c: c.start)
+
+
+# ── keywords, dates and numbers ───────────────────────────────────────────────
+# Everything meaningful in a transcript or document becomes a clue, so that
+# anything said in one place and written / seen in another can be matched —
+# not only plates, phones and names.
+
+import calendar
+from dataclasses import dataclass
+
+try:  # word-frequency table (bundled offline) used to ignore filler words
+    from wordfreq import zipf_frequency as _zipf
+except Exception:  # pragma: no cover - degrade to the built-in stop list
+    _zipf = None
+
+# Words more common than this (Zipf scale; "the" = 7.7, "bank" = 5.2) are filler.
+MAX_ZIPF = 5.8
+MIN_WORD_LEN = 4
+
+_FILLER = {
+    "that", "this", "with", "have", "from", "they", "were", "been", "being", "will", "would", "could",
+    "should", "there", "their", "them", "then", "than", "what", "when", "where", "which", "while", "about",
+    "after", "before", "again", "also", "very", "just", "only", "some", "such", "into", "over", "under",
+    "your", "yours", "mine", "ours", "said", "says", "told", "tell", "going", "gone", "went", "come", "came",
+    "back", "here", "like", "make", "made", "know", "knew", "think", "thought", "want", "wanted", "need",
+    "take", "took", "give", "gave", "look", "looked", "saw", "seen", "see", "does", "done", "did", "doing",
+    "okay", "yeah", "well", "right", "sure", "please", "thank", "thanks", "sorry", "hello", "people",
+    "something", "anything", "everything", "nothing", "because", "maybe", "still", "even", "much", "many",
+    "more", "most", "other", "another", "same", "each", "every", "both", "never", "always", "around",
+}
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'’-]*[A-Za-z]")
+# not part of a longer number/date/decimal ("12.50", "11-10-2026"), but a trailing full stop is fine
+_NUM_RE = re.compile(r"(?<!\d)(?<![./-]\d)\d{5,9}(?!\d)(?![./-]\d)")
+_MONTHS = {m.lower(): i for i, m in enumerate(calendar.month_name) if m}
+_MONTHS.update({m.lower(): i for i, m in enumerate(calendar.month_abbr) if m})
+_MON = "|".join(sorted(_MONTHS, key=len, reverse=True))
+_DATE_RES = [
+    re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b"),                                    # 2026-10-11
+    re.compile(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})\b"),                      # 11/10/2026 (d/m/y)
+    re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MON})\.?,?\s+(\d{{4}})\b", re.I),  # 11 October 2026
+    re.compile(rf"\b({_MON})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})\b", re.I),  # October 11, 2026
+]
+
+
+@dataclass(frozen=True)
+class WeightedClue(TextClue):
+    """A clue carrying a 0-1 distinctiveness weight (rare words weigh more)."""
+    weight: float = 1.0
+
+
+def _stem(word: str) -> str:
+    """Tiny, predictable normaliser so 'vans'/'van's'/'Vans' compare equal."""
+    w = word.lower().strip("'’-")
+    w = re.sub(r"['’]s$", "", w)
+    if len(w) > 5 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if len(w) > 5 and re.search(r"(ches|shes|sses|xes|zes)$", w):
+        return w[:-2]
+    if len(w) > 4 and w.endswith("s") and not w.endswith(("ss", "us", "is")):
+        return w[:-1]
+    return w
+
+
+def _distinctiveness(word: str) -> Optional[float]:
+    """None = filler (ignore); otherwise 0.15-1.0, higher for rarer words."""
+    if word in _FILLER:
+        return None
+    if _zipf is None:
+        return 0.5
+    z = _zipf(word, "en")
+    if z >= MAX_ZIPF:
+        return None
+    return max(0.15, min(1.0, (6.2 - z) / 4.7))      # unknown/rare (z~0) -> 1.0
+
+
+def _iso(y: int, m: int, d: int) -> Optional[str]:
+    if y < 100:
+        y += 2000
+    try:
+        import datetime
+        return datetime.date(y, m, d).isoformat()
+    except ValueError:
+        return None
+
+
+def extract_dates(text: str) -> List[TextClue]:
+    found: Dict[str, TextClue] = {}
+    for i, rx in enumerate(_DATE_RES):
+        for m in rx.finditer(text):
+            g = m.groups()
+            if i == 0:
+                iso = _iso(int(g[0]), int(g[1]), int(g[2]))
+            elif i == 1:
+                d, mo = int(g[0]), int(g[1])
+                if mo > 12 and d <= 12:               # tolerate m/d/y
+                    d, mo = mo, d
+                iso = _iso(int(g[2]), mo, d)
+            elif i == 2:
+                iso = _iso(int(g[2]), _MONTHS[g[1].lower().rstrip(".")], int(g[0]))
+            else:
+                iso = _iso(int(g[2]), _MONTHS[g[0].lower().rstrip(".")], int(g[1]))
+            if iso and iso not in found:
+                s, e = m.span()
+                found[iso] = TextClue("DATE", m.group(0), iso, f"date_{i}", s, e, _context(text, s, e))
+    return list(found.values())
+
+
+def extract_all_terms(text: str) -> List[TextClue]:
+    """NAME + OBJECT + DATE + NUMBER + KEYWORD clues from free text."""
+    if not text or not text.strip():
+        return []
+    cleaned = _clean(text)
+    clues: List[TextClue] = list(extract_terms(text))
+    clues += extract_dates(cleaned)
+
+    taken_words = set()
+    for c in clues:
+        taken_words.update(w.lower() for w in re.findall(r"[A-Za-z]+", c.value))
+        if c.kind == "OBJECT":                      # "white van" -> don't also emit "van"/"white"
+            taken_words.update(_words(c.norm))
+
+    # long digit strings that are not phones / dates (invoice, account, reference numbers)
+    date_spans = [(c.start, c.end) for c in clues if c.kind == "DATE"]
+    for m in _NUM_RE.finditer(cleaned):
+        s, e = m.span()
+        if any(s < de and e > ds for ds, de in date_spans):
+            continue
+        clues.append(TextClue("NUMBER", m.group(0), m.group(0), "digits", s, e, _context(cleaned, s, e)))
+
+    seen = set()
+    for m in _WORD_RE.finditer(cleaned):
+        raw = m.group(0)
+        low = raw.lower()
+        if len(low) < MIN_WORD_LEN or low in taken_words:
+            continue
+        w = _distinctiveness(low)
+        if w is None:
+            continue
+        norm = _stem(low)
+        if norm in seen or norm in taken_words:
+            continue
+        seen.add(norm)
+        s, e = m.span()
+        clues.append(WeightedClue("KEYWORD", low, norm, "keyword", s, e, _context(cleaned, s, e), weight=round(w, 2)))
+    return clues

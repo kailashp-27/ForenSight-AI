@@ -22,8 +22,12 @@ interface Props {
 export function ClueMatches({ matches, highlightedId, onHighlight, onOpenMember }: Props) {
   const [showWeak, setShowWeak] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  const strong = matches.filter((m) => m.strength !== "WEAK");
-  const weak = matches.filter((m) => m.strength === "WEAK");
+  const keywords = matches.filter((m) => m.kind === "KEYWORD");
+  const strong = matches.filter((m) => m.kind !== "KEYWORD" && m.strength !== "WEAK");
+  const weak = matches.filter((m) => m.kind !== "KEYWORD" && m.strength === "WEAK");
+  const [kwOpen, setKwOpen] = useState(true);
+  const [kwQuery, setKwQuery] = useState("");
+  const kwShown = keywords.filter((m) => !kwQuery.trim() || m.value.toLowerCase().includes(kwQuery.trim().toLowerCase()));
   const list = showWeak ? [...strong, ...weak] : strong;
 
   if (matches.length === 0) {
@@ -41,7 +45,7 @@ export function ClueMatches({ matches, highlightedId, onHighlight, onOpenMember 
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {list.length === 0 && (
+      {list.length === 0 && weak.length > 0 && (
         <p style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
           Only weak appearance-only similarities were found. They are hidden by default.
         </p>
@@ -121,6 +125,66 @@ export function ClueMatches({ matches, highlightedId, onHighlight, onOpenMember 
           </article>
         );
       })}
+      {keywords.length > 0 && (
+        <section className="card" style={{ overflow: "hidden" }} data-testid="keyword-section">
+          <button
+            onClick={() => setKwOpen(!kwOpen)}
+            style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "0.6rem 0.85rem",
+                     background: "var(--color-bg-elevated)", border: "none", cursor: "pointer", textAlign: "left" }}
+          >
+            {kwOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            <strong style={{ fontSize: "0.85rem", color: "var(--color-text-primary)" }}>
+              Shared keywords ({keywords.length})
+            </strong>
+            <span style={{ fontSize: "0.7rem", color: "var(--color-text-muted)" }}>
+              words, dates and numbers that appear in more than one evidence item
+            </span>
+          </button>
+          {kwOpen && (
+            <div style={{ padding: "0.6rem 0.85rem" }}>
+              <input
+                aria-label="Search shared keywords"
+                placeholder="Search keywords…"
+                value={kwQuery}
+                onChange={(e) => setKwQuery(e.target.value)}
+                style={{ height: 30, width: 220, marginBottom: 8, padding: "0 8px", background: "var(--color-bg-input)",
+                         color: "var(--color-text-primary)", border: "1px solid var(--color-border-bright)",
+                         borderRadius: 6, fontSize: "0.76rem" }}
+              />
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {kwShown.map((m) => (
+                  <div
+                    key={m.id}
+                    data-testid="keyword-row"
+                    style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "4px 0",
+                             borderBottom: "1px solid var(--color-border-subtle)" }}
+                  >
+                    <strong style={{ fontSize: "0.82rem", color: "var(--color-text-primary)", minWidth: 120 }}>{m.value}</strong>
+                    <span style={{ fontSize: "0.65rem", fontFamily: "monospace", color: "var(--color-text-subtle)" }}>
+                      {Math.round(m.score * 100)}%
+                    </span>
+                    {[...new Map(m.members.map((x) => [x.evidence_id, x])).values()].map((mem) => (
+                      <button
+                        key={mem.evidence_id}
+                        title={mem.context ?? ""}
+                        onClick={() => onOpenMember(mem.evidence_id, mem.file_type, mem.timestamp_ms)}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "0.7rem", cursor: "pointer",
+                                 color: "var(--color-text-body)", background: "var(--color-bg-card)",
+                                 border: "1px solid var(--color-border)", borderRadius: 999, padding: "1px 8px" }}
+                      >
+                        <ExternalLink size={10} style={{ color: "var(--color-accent)" }} />
+                        {mem.file_name}
+                        {mem.timestamp_str ? <span style={{ fontFamily: "monospace", color: "#22d3ee" }}>@{mem.timestamp_str}</span> : null}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+                {kwShown.length === 0 && <p style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>No keywords match.</p>}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
       {weak.length > 0 && (
         <button
           onClick={() => setShowWeak(!showWeak)}

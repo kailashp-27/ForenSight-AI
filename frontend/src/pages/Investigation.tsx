@@ -207,6 +207,7 @@ export function Investigation() {
           {kpi("Clues extracted", totals?.clues, undefined, "clues")}
           {kpi("Strong matches", totals?.strong, "#10b981", "matches")}
           {kpi("Medium matches", totals?.medium, "#f59e0b", "matches")}
+          {kpi("Shared keywords", totals?.keywords, "#06b6d4", "matches")}
           {kpi("Weak similarities", totals?.weak, "#94a3b8")}
         </div>
       </div>

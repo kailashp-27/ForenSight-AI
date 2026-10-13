@@ -31,11 +31,13 @@ from backend.modules.clue_terms import object_key
 from backend.modules.clue_text import match_key
 
 FUZZY_THRESHOLD = 88
-_TEXT_KINDS = {"PLATE", "PHONE", "EMAIL", "ID", "AMOUNT", "NAME", "TEXT"}
+_TEXT_KINDS = {"PLATE", "PHONE", "EMAIL", "ID", "AMOUNT", "NAME", "TEXT", "DATE", "NUMBER", "KEYWORD"}
 _FUZZY_KINDS = {"PLATE", "ID", "NAME"}
 # Names and free text are weaker evidence of identity than a plate or a phone number:
 # they can never reach STRONG on their own.
-_KIND_WEIGHT = {"NAME": 0.8, "TEXT": 0.8}
+# A shared everyday word is weak evidence: keyword overlap is reported (so nothing said or
+# written is lost) but capped well below MEDIUM.
+_KIND_WEIGHT = {"NAME": 0.8, "TEXT": 0.8, "DATE": 0.75, "NUMBER": 0.8, "KEYWORD": 0.5}
 
 _BASE_SCORE = {"EXACT": 0.95, "OCR_VARIANT": 0.85, "FUZZY": 0.70, "APPEARANCE": 0.35}
 _STRENGTH = [(0.8, "STRONG"), (0.6, "MEDIUM"), (0.0, "WEAK")]
@@ -157,6 +159,8 @@ def _build_match(kind: str, mtype: str, members: List[Dict[str, Any]],
     score = _BASE_SCORE[mtype]
     # Low-confidence OCR reads should not produce STRONG matches.
     score = score * _KIND_WEIGHT.get(kind, 1.0)
+    if kind == "KEYWORD":   # rarer words are more distinctive
+        score *= max(0.3, sum(float(m.get("weight", 0.5)) for m in members) / max(1, len(members)))
     score = round(min(0.99, score * (0.75 + 0.25 * avg_conf) + (0.05 if verified else 0)), 3)
 
     display = max(members, key=lambda m: float(m.get("confidence") or 0))["value"]
@@ -164,6 +168,9 @@ def _build_match(kind: str, mtype: str, members: List[Dict[str, Any]],
         why = (f"An object described as '{display}' was detected in {len(ev_ids)} different "
                "evidence items. This is an appearance-only similarity and does not establish "
                "that it is the same object.")
+    elif mtype == "EXACT" and kind == "KEYWORD":
+        why = (f"The word '{display}' appears in {len(ev_ids)} different evidence items. This is keyword "
+               "overlap only; ordinary words can coincide by chance, so check the passages.")
     elif mtype == "EXACT":
         why = f"The identical {kind.lower()} '{display}' appears in {len(ev_ids)} different evidence items."
     elif mtype == "OCR_VARIANT":

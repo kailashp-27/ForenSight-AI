@@ -84,3 +84,43 @@ def test_object_key_canonicalisation():
     assert object_key("White sedan") == object_key("white hatchback") == "white car"
     assert object_key("knife-shaped metallic object") == "knife"
     assert [c.value for c in extract_terms("a car came by")] == []        # bare "car" is too generic
+
+
+# ── keywords / dates / numbers (everything meaningful becomes a clue) ─────────
+
+def test_keywords_dates_and_numbers_are_extracted_and_filler_is_not():
+    from backend.modules.clue_terms import extract_all_terms
+    terms = extract_all_terms("On 11/10/2026 the driver took the parcel to the warehouse, invoice 458921, "
+                              "and people said that it was fine.")
+    got = {(c.kind, c.norm) for c in terms}
+    assert ("DATE", "2026-10-11") in got
+    assert ("NUMBER", "458921") in got
+    assert ("KEYWORD", "warehouse") in got
+    assert not any(c.kind == "KEYWORD" and c.norm in {"said", "that", "people"} for c in terms)
+
+
+def test_date_formats_normalise_to_the_same_iso_date():
+    from backend.modules.clue_terms import extract_dates
+    forms = ["11/10/2026", "2026-10-11", "11 October 2026", "October 11, 2026", "11th Oct 2026"]
+    assert {extract_dates(f)[0].norm for f in forms} == {"2026-10-11"}
+
+
+def test_shared_keywords_dates_and_numbers_link_speech_and_pdf():
+    pool = _clue_dicts(ctx(chunks=[
+        chunk("c1", "audio", "I delivered it to the warehouse on 11 October 2026. The invoice 458921 was cash.", start=3.0),
+        chunk("c2", "pdf", "Dated 11/10/2026. Goods left the Warehouse. Invoice no. 458921.", source="PDF_OCR", page=1),
+    ]))
+    by_kind = {}
+    for m in correlate(pool, EVIDENCE):
+        by_kind.setdefault(m["kind"], []).append(m)
+    assert by_kind["KEYWORD"] and any(m["value"] in ("warehouse", "invoice") for m in by_kind["KEYWORD"])
+    assert all(m["strength"] == "WEAK" for m in by_kind["KEYWORD"])          # never over-claimed
+    assert by_kind["DATE"][0]["value"] and by_kind["DATE"][0]["strength"] == "MEDIUM"
+    assert by_kind["NUMBER"][0]["strength"] == "MEDIUM"
+    assert {x["source"] for x in by_kind["KEYWORD"][0]["members"]} == {"TRANSCRIPT", "DOCUMENT"}
+
+
+def test_ocr_pdf_chunks_are_treated_as_document_clues():
+    pool = _clue_dicts(ctx(chunks=[chunk("c1", "pdf", "Locker number 7731 near the ferry terminal", source="PDF_OCR", page=2)]))
+    assert pool and all(c["source"] == "DOCUMENT" for c in pool)
+    assert all("page 2" in c["context"] for c in pool)

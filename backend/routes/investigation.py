@@ -126,7 +126,8 @@ async def correlations(case_id: str, include_weak: bool = True) -> Dict[str, Any
             "matches": len(data["matches"]),
             "strong": sum(m["strength"] == "STRONG" for m in data["matches"]),
             "medium": sum(m["strength"] == "MEDIUM" for m in data["matches"]),
-            "weak": sum(m["strength"] == "WEAK" for m in data["matches"]),
+            "weak": sum(m["strength"] == "WEAK" and m["kind"] != "KEYWORD" for m in data["matches"]),
+            "keywords": sum(m["kind"] == "KEYWORD" for m in data["matches"]),
             "evidence": len(data["evidence"]),
         },
     }
@@ -441,6 +442,8 @@ async def case_transcripts(case_id: str) -> Dict[str, Any]:
                     continue
                 seen.add((c.kind, norm))
                 hits = index.get((ev["id"], c.kind, _term_key(c.kind, norm)), [])
+                if c.kind == "KEYWORD" and not hits:
+                    continue          # an unshared everyday word is not worth showing
                 terms.append({
                     "kind": c.kind, "value": value,
                     "matches": [{

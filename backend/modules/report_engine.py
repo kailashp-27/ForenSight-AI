@@ -76,6 +76,8 @@ def build_report_html(d: Dict[str, Any]) -> str:
     generated = d.get("generated_at") or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     ev_name = {e["id"]: e["file_name"] for e in evidence}
 
+    keywords = [m for m in matches if m["kind"] == "KEYWORD"]
+    matches = [m for m in matches if m["kind"] != "KEYWORD"]
     strong = [m for m in matches if m["strength"] in ("STRONG", "MEDIUM")]
     weak = [m for m in matches if m["strength"] == "WEAK"]
     verified = [f for f in findings if f.get("verification_status") == "Verified"]
@@ -124,6 +126,15 @@ def build_report_html(d: Dict[str, Any]) -> str:
                      f"<td>{_E(str(mem['source']))}</td><td>{_t(mem['value'])}</td><td>{_pct(mem['confidence'])}</td>"
                      f"<td>{_t(mem.get('context') or '')}</td></tr>")
         o.append("</table></div>")
+
+    if keywords:
+        o.append("<h3>Shared keywords</h3><p class='muted'>Words that appear in more than one evidence item. "
+                 "Keyword overlap alone is weak: ordinary words can coincide by chance.</p>"
+                 "<table><tr><th>Keyword</th><th>Evidence</th><th>Score</th></tr>")
+        for m in keywords[:60]:
+            files = ", ".join(sorted({mem["file_name"] for mem in m["members"]}))
+            o.append(f"<tr><td>{_t(m['value'])}</td><td>{_E(files)}</td><td>{_pct(m['score'])}</td></tr>")
+        o.append("</table>")
 
     # 4. verified findings
     o.append("<h2>4. Investigator-verified findings</h2>")

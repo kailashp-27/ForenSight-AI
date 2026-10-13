@@ -200,7 +200,10 @@ export interface ClueMatch {
 
 export interface Correlations {
   matches: ClueMatch[];
-  totals: { clues: number; matches: number; strong: number; medium: number; weak: number; evidence: number };
+  totals: {
+    clues: number; matches: number; strong: number; medium: number; weak: number;
+    keywords: number; evidence: number;
+  };
 }
 
 export interface AnalysisStatus {

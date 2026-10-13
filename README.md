@@ -197,3 +197,5 @@ mentioned in speech without a colour is not matched (a bare "car" would match ev
 
 The dashboard **Intelligence Strip** is live: Leads = strongest shared clues across cases, Gaps = concrete
 unfinished/missing items, Activity = recent custody-log entries. There are no hypotheses or hard-coded items.
+
+**Keywords, dates and numbers.** Beyond plates, names and objects, every meaningful word in a transcript, PDF or scan note becomes a KEYWORD clue (filler words are dropped using a word-frequency table); dates are normalised (`11/10/2026` = `11 October 2026`) and long digit strings become NUMBER clues. Shared keywords are listed in their own section of **Matching clues**; they are always rated WEAK because ordinary words can coincide by chance, while shared dates and numbers are MEDIUM.
