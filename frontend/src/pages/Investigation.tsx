@@ -5,19 +5,23 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  ArrowLeft, Download, FileText, GraduationCap, Link2, Loader2, MapPin, Network, Play, Printer, Sparkles,
+  ArrowLeft, Download, FileText, GraduationCap, Link2, ListChecks, Loader2, MapPin, MessageSquareText, Network, Play,
+  Printer, Sparkles,
 } from "lucide-react";
 import { casesApi, type Case } from "../services/api";
 import {
-  investigationApi, type AnalysisStatus, type CaseGraph, type CaseMapData, type ClueMatch, type Correlations,
+  investigationApi, caseViewsApi, type AnalysisStatus, type CaseClue, type CaseGraph, type CaseMapData,
+  type CaseTranscripts, type ClueMatch, type Correlations,
 } from "../services/forensicApi";
 import { ClueMatches } from "../components/investigation/ClueMatches";
+import { ClueList } from "../components/investigation/ClueList";
+import { TranscriptsPanel } from "../components/investigation/TranscriptsPanel";
 import { ReviewQueue } from "../components/investigation/ReviewQueue";
 import { CaseMap } from "../components/investigation/CaseMap";
 import { EntityGraph } from "../components/cctv/EntityGraph";
 import { AiDisclaimerBanner } from "../components/ai/AiDisclaimerBanner";
 
-type Tab = "matches" | "review" | "map" | "graph" | "report";
+type Tab = "matches" | "clues" | "transcripts" | "review" | "map" | "graph" | "report";
 
 const STATUS_COLOR: Record<string, string> = {
   COMPLETED: "#10b981", PARTIAL: "#f59e0b", RUNNING: "#3b82f6", FAILED: "#ef4444", NOT_RUN: "#64748b",
@@ -32,6 +36,8 @@ export function Investigation() {
   const [status, setStatus] = useState<AnalysisStatus | null>(null);
   const [map, setMap] = useState<CaseMapData | null>(null);
   const [graph, setGraph] = useState<CaseGraph | null>(null);
+  const [clues, setClues] = useState<CaseClue[] | null>(null);
+  const [transcripts, setTranscripts] = useState<CaseTranscripts | null>(null);
   const [tab, setTab] = useState<Tab>("matches");
   const [highlight, setHighlight] = useState<ClueMatch | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,14 +47,18 @@ export function Investigation() {
   const loadViews = useCallback(async () => {
     if (!caseId) return;
     try {
-      const [c, m, g] = await Promise.all([
+      const [c, m, g, cl, tr] = await Promise.all([
         investigationApi.correlations(caseId),
         investigationApi.map(caseId),
         investigationApi.clueGraph(caseId),
+        caseViewsApi.caseClues(caseId),
+        caseViewsApi.transcripts(caseId),
       ]);
       setCorr(c);
       setMap(m);
       setGraph(g);
+      setClues(cl);
+      setTranscripts(tr);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -107,6 +117,17 @@ export function Investigation() {
     else navigate(`/cases/${caseId}?view=${evidenceId}`);
   };
 
+  const typeOf = (evidenceId: string) => status?.items.find((i) => i.evidence_id === evidenceId)?.file_type ?? null;
+
+  const extractText = async (evidenceId: string) => {
+    try {
+      await investigationApi.analyzeEvidence(evidenceId);
+      await loadStatus();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   const totals = corr?.totals;
   const highlightedEvidence = useMemo(() => highlight?.evidence_ids ?? [], [highlight]);
 
@@ -132,10 +153,21 @@ export function Investigation() {
     </button>
   );
 
-  const kpi = (label: string, value: number | string | undefined, color?: string) => (
-    <div className="card" style={{ padding: "0.6rem 0.9rem", minWidth: 110 }}>
+  const kpi = (label: string, value: number | string | undefined, color?: string, goTo?: Tab) => (
+    <div
+      className="card"
+      role={goTo ? "button" : undefined}
+      tabIndex={goTo ? 0 : undefined}
+      aria-label={goTo ? `${label}: ${value ?? 0}. Open list` : undefined}
+      onClick={goTo ? () => setTab(goTo) : undefined}
+      onKeyDown={goTo ? (e) => e.key === "Enter" && setTab(goTo) : undefined}
+      style={{ padding: "0.6rem 0.9rem", minWidth: 110, cursor: goTo ? "pointer" : "default",
+               borderColor: goTo && tab === goTo ? "var(--color-accent)" : undefined }}
+    >
       <div style={{ fontSize: "1.35rem", fontWeight: 800, color: color ?? "var(--color-text-primary)" }}>{value ?? "–"}</div>
-      <div style={{ fontSize: "0.68rem", color: "var(--color-text-muted)" }}>{label}</div>
+      <div style={{ fontSize: "0.68rem", color: "var(--color-text-muted)" }}>
+        {label}{goTo ? " ›" : ""}
+      </div>
     </div>
   );
 
@@ -172,9 +204,9 @@ export function Investigation() {
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
           {kpi("Evidence", totals?.evidence)}
-          {kpi("Clues extracted", totals?.clues)}
-          {kpi("Strong matches", totals?.strong, "#10b981")}
-          {kpi("Medium matches", totals?.medium, "#f59e0b")}
+          {kpi("Clues extracted", totals?.clues, undefined, "clues")}
+          {kpi("Strong matches", totals?.strong, "#10b981", "matches")}
+          {kpi("Medium matches", totals?.medium, "#f59e0b", "matches")}
           {kpi("Weak similarities", totals?.weak, "#94a3b8")}
         </div>
       </div>
@@ -212,6 +244,8 @@ export function Investigation() {
 
       <div style={{ padding: "0.75rem 1.25rem", display: "flex", gap: 4 }} role="tablist">
         {tabBtn("matches", "Matching clues", <Link2 size={14} />, (totals?.strong ?? 0) + (totals?.medium ?? 0))}
+        {tabBtn("clues", "All clues", <ListChecks size={14} />, totals?.clues)}
+        {tabBtn("transcripts", "Transcripts & text", <MessageSquareText size={14} />, transcripts?.totals.passages)}
         {tabBtn("review", "Review detections", <GraduationCap size={14} />)}
         {tabBtn("map", "Map", <MapPin size={14} />, map?.points.length)}
         {tabBtn("graph", "Graph", <Network size={14} />)}
@@ -225,6 +259,22 @@ export function Investigation() {
             highlightedId={highlight?.id}
             onHighlight={setHighlight}
             onOpenMember={openMember}
+          />
+        )}
+
+        {tab === "clues" && (
+          <ClueList
+            clues={clues}
+            onShowMatches={() => setTab("matches")}
+            onOpen={(eid, ts) => openMember(eid, typeOf(eid), ts)}
+          />
+        )}
+
+        {tab === "transcripts" && (
+          <TranscriptsPanel
+            data={transcripts}
+            onAnalyze={extractText}
+            onOpen={(eid, ftype, ts) => openMember(eid, ftype, ts)}
           />
         )}
 

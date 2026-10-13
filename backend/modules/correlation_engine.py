@@ -27,11 +27,15 @@ from typing import Any, Dict, List, Optional
 
 from rapidfuzz import fuzz
 
+from backend.modules.clue_terms import object_key
 from backend.modules.clue_text import match_key
 
 FUZZY_THRESHOLD = 88
-_TEXT_KINDS = {"PLATE", "PHONE", "EMAIL", "ID", "AMOUNT"}
-_FUZZY_KINDS = {"PLATE", "ID"}
+_TEXT_KINDS = {"PLATE", "PHONE", "EMAIL", "ID", "AMOUNT", "NAME", "TEXT"}
+_FUZZY_KINDS = {"PLATE", "ID", "NAME"}
+# Names and free text are weaker evidence of identity than a plate or a phone number:
+# they can never reach STRONG on their own.
+_KIND_WEIGHT = {"NAME": 0.8, "TEXT": 0.8}
 
 _BASE_SCORE = {"EXACT": 0.95, "OCR_VARIANT": 0.85, "FUZZY": 0.70, "APPEARANCE": 0.35}
 _STRENGTH = [(0.8, "STRONG"), (0.6, "MEDIUM"), (0.0, "WEAK")]
@@ -98,9 +102,16 @@ def correlate(clues: List[Dict[str, Any]], evidence: Dict[str, Dict[str, Any]]) 
                     continue
                 ka = next(iter(a.keys))[1]
                 kb = next(iter(b.keys))[1]
-                if min(len(ka), len(kb)) < 6:
-                    continue
-                if fuzz.ratio(ka, kb) >= FUZZY_THRESHOLD:
+                if a.kind == "NAME":
+                    # "Ramesh" and "Ramesh Kumar" are one person mentioned two ways.
+                    if min(len(ka), len(kb)) < 4:
+                        continue
+                    similar = fuzz.token_set_ratio(ka, kb) >= 95 or fuzz.ratio(ka, kb) >= FUZZY_THRESHOLD
+                else:
+                    if min(len(ka), len(kb)) < 6:
+                        continue
+                    similar = fuzz.ratio(ka, kb) >= FUZZY_THRESHOLD
+                if similar:
                     a.members.extend(b.members)
                     a.keys |= b.keys
                     a.exact_norms |= b.exact_norms
@@ -129,7 +140,7 @@ def correlate(clues: List[Dict[str, Any]], evidence: Dict[str, Dict[str, Any]]) 
     for c in clues:
         if c["kind"] != "OBJECT":
             continue
-        app.setdefault((c.get("norm_value") or c["value"]).lower(), []).append(c)
+        app.setdefault(object_key(c.get("norm_value") or c["value"]), []).append(c)
     for key, members in app.items():
         if len({m["evidence_id"] for m in members}) >= 2:
             matches.append(_build_match("OBJECT", "APPEARANCE", members, evidence, [key]))
@@ -145,6 +156,7 @@ def _build_match(kind: str, mtype: str, members: List[Dict[str, Any]],
     avg_conf = sum(float(m.get("confidence") or 0) for m in members) / max(1, len(members))
     score = _BASE_SCORE[mtype]
     # Low-confidence OCR reads should not produce STRONG matches.
+    score = score * _KIND_WEIGHT.get(kind, 1.0)
     score = round(min(0.99, score * (0.75 + 0.25 * avg_conf) + (0.05 if verified else 0)), 3)
 
     display = max(members, key=lambda m: float(m.get("confidence") or 0))["value"]
@@ -153,7 +165,7 @@ def _build_match(kind: str, mtype: str, members: List[Dict[str, Any]],
                "evidence items. This is an appearance-only similarity and does not establish "
                "that it is the same object.")
     elif mtype == "EXACT":
-        why = f"The identical {kind.lower()} '{display}' was read in {len(ev_ids)} different evidence items."
+        why = f"The identical {kind.lower()} '{display}' appears in {len(ev_ids)} different evidence items."
     elif mtype == "OCR_VARIANT":
         why = (f"{kind.title()} readings {', '.join(repr(n) for n in norms)} differ only by common "
                f"OCR character confusions and are treated as the same {kind.lower()}.")
@@ -175,6 +187,7 @@ def _build_match(kind: str, mtype: str, members: List[Dict[str, Any]],
             "timestamp_str": _ts_str(m.get("timestamp_ms")),
             "confidence": float(m.get("confidence") or 0),
             "context": m.get("context"),
+            "norm_value": m.get("norm_value"),
             "bbox": m.get("bbox"),
             "verified": bool(m.get("verified")),
         })

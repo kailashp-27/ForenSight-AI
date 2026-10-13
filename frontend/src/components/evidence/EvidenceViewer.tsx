@@ -15,6 +15,7 @@ interface TextChunk {
   source_type: string;
   start_time: number | null;
   end_time: number | null;
+  page_number?: number | null;
 }
 
 interface EvidenceDetail {
@@ -149,6 +150,33 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
     } catch (err) {
       console.error(err);
       setEvidence(e => e ? { ...e, transcription_status: "FAILED" } : null);
+    }
+  };
+
+  // Documents/images: run text extraction (PDF text layer, or OCR for scanned pages) on demand.
+  const [extracting, setExtracting] = useState(false);
+  const handleExtractText = async () => {
+    setExtracting(true);
+    try {
+      await investigationApi.analyzeEvidence(evidenceId);
+      const started = Date.now();
+      const poll = async () => {
+        const r = await fetch(`/api/evidence/${evidenceId}`);
+        if (r.ok) {
+          const data = await r.json();
+          if ((data.textChunks && data.textChunks.length > 0) || Date.now() - started > 90_000) {
+            setEvidence(data);
+            setExtracting(false);
+            investigationApi.evidenceClues(evidenceId).then((c) => setClues(c.clues)).catch(() => undefined);
+            return;
+          }
+        }
+        window.setTimeout(poll, 2500);
+      };
+      window.setTimeout(poll, 2500);
+    } catch (err) {
+      console.error(err);
+      setExtracting(false);
     }
   };
 
@@ -621,7 +649,10 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
                                 </span>
                               )}
                               <span style={{ fontSize: "0.68rem", color: "#a855f7", fontFamily: "monospace", fontWeight: 600 }}>
-                                {chunk.start_time !== null ? formatTime(chunk.start_time) : "0:00"}
+                                {chunk.page_number
+                                  ? `Page ${chunk.page_number}`
+                                  : chunk.start_time !== null ? formatTime(chunk.start_time) : "0:00"}
+                                {chunk.source_type === "PDF_OCR" ? " · OCR (scanned page)" : ""}
                               </span>
                             </div>
                             {isChunkActive && (
@@ -648,6 +679,19 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
                              ? "Click below to run the Whisper AI speech-to-text pipeline." 
                              : "No OCR text extraction has been generated for this file."}
                       </p>
+                      {(evidence.file_type === "DOCUMENT" || evidence.file_type === "IMAGE") && (
+                        <div style={{ marginTop: 16 }}>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            loading={extracting}
+                            icon={<FileText size={14} />}
+                            onClick={handleExtractText}
+                          >
+                            {extracting ? "Extracting text…" : "Extract text now (OCR for scanned pages)"}
+                          </Button>
+                        </div>
+                      )}
                       {/* Show spinner while transcribing */}
                       {evidence.transcription_status === "TRANSCRIBING" && (
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16, color: "var(--color-accent)", fontSize: "0.78rem", justifyContent: "center" }}>

@@ -294,3 +294,96 @@ export const investigationApi = {
     ),
   reportUrl: (caseId: string, download = false) => `${BASE}/cases/${caseId}/report?download=${download}`,
 };
+
+// ── Case clues, transcripts and global overview ──────────────────────────────
+
+export interface CaseClue {
+  id: string;
+  evidence_id: string;
+  file_name: string | null;
+  kind: string;
+  value: string;
+  confidence: number;
+  source: string;
+  timestamp_ms: number | null;
+  context: string | null;
+  match_ids: string[];
+}
+
+export interface TranscriptTerm {
+  kind: string;
+  value: string;
+  matches: { id: string; strength: MatchStrength; score: number; also_in: string[] }[];
+}
+
+export interface TranscriptChunk {
+  id: string;
+  text: string;
+  page: number | null;
+  source: "TRANSCRIPT" | "DOCUMENT";
+  ocr: boolean;
+  start_ms: number | null;
+  end_ms: number | null;
+  terms: TranscriptTerm[];
+}
+
+export interface CaseTranscripts {
+  evidence: {
+    evidence_id: string;
+    file_name: string;
+    file_type: string;
+    analysis_status: string;
+    transcription_status: string | null;
+    chunks: TranscriptChunk[];
+    matched_terms: number;
+  }[];
+  totals: { passages: number; matched_terms: number };
+}
+
+export interface OverviewLead {
+  id: string;
+  case_id: string;
+  case_number: string;
+  case_title: string;
+  kind: string;
+  value: string;
+  strength: MatchStrength;
+  score: number;
+  match_type: string;
+  explanation: string;
+  verified: boolean;
+  files: string[];
+  sources: { file: string; at: string | null; source: string | null; reading: string }[];
+}
+
+export interface OverviewGap {
+  id: string;
+  severity: "high" | "medium" | "low";
+  text: string;
+  case_id: string;
+  case_number: string;
+  kind: string;
+}
+
+export interface OverviewActivity {
+  id: string;
+  seq: number;
+  action: string;
+  text: string;
+  case_number: string | null;
+  operator: string;
+  time: string;
+}
+
+export interface Overview {
+  leads: OverviewLead[];
+  gaps: OverviewGap[];
+  activity: OverviewActivity[];
+  stats: { cases: number; evidence: number; clues: number; matches: number };
+}
+
+export const caseViewsApi = {
+  caseClues: (caseId: string) => request<CaseClue[]>(`/cases/${caseId}/clues`),
+  transcripts: (caseId: string) => request<CaseTranscripts>(`/cases/${caseId}/transcripts`),
+  overview: () => request<Overview>("/overview"),
+};

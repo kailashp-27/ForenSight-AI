@@ -332,6 +332,7 @@ class AnalysisResult:
     duration_ms: int = 0
     warnings: List[str] = field(default_factory=list)
     tracks: List[TrackSummary] = field(default_factory=list)
+    ocr_pages: set = field(default_factory=set)
     plates: List[PlateFinding] = field(default_factory=list)
     method: str = "legacy"
 
@@ -473,16 +474,59 @@ def analyze_image(path: str | Path) -> AnalysisResult:
 # ── documents ────────────────────────────────────────────────────────────────
 
 def analyze_pdf(path: str | Path) -> AnalysisResult:
+    """
+    Text per page. Pages with no usable text layer (scanned / photographed PDFs)
+    are rendered and OCR'd instead, so image-only documents are not silently empty.
+    """
     import fitz  # PyMuPDF
     result = AnalysisResult(kind="DOCUMENT")
+    skipped_ocr = 0
     with fitz.open(str(path)) as doc:
         for i, page in enumerate(doc, start=1):
-            text = page.get_text("text") or ""
+            if i > settings.PDF_MAX_PAGES:
+                result.warnings.append(f"Only the first {settings.PDF_MAX_PAGES} pages were processed.")
+                break
+            text = (page.get_text("text") or "").strip()
+            if len(text) < settings.PDF_OCR_MIN_CHARS:
+                if _get_ocr() is None:
+                    skipped_ocr += 1
+                else:
+                    ocr_text = _ocr_pdf_page(page, fitz)
+                    if len(ocr_text) > len(text):
+                        text = ocr_text
+                        result.ocr_pages.add(i)
             if text.strip():
                 result.pages.append((i, text))
-        if not result.pages:
-            result.warnings.append("No extractable text layer (scanned PDF?); OCR of PDF pages not performed.")
+        if skipped_ocr:
+            result.warnings.append(f"{skipped_ocr} page(s) have no text layer and OCR is unavailable.")
+        elif not result.pages:
+            result.warnings.append("No text could be read from this PDF (blank or unreadable pages).")
     return result
+
+
+def _ocr_pdf_page(page, fitz) -> str:
+    """Render one PDF page and OCR it; returns reading-order text."""
+    pix = page.get_pixmap(matrix=fitz.Matrix(settings.PDF_OCR_ZOOM, settings.PDF_OCR_ZOOM), alpha=False)
+    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+    if pix.n == 1:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    else:
+        img = cv2.cvtColor(img[:, :, :3], cv2.COLOR_RGB2BGR)
+    lines = _run_ocr(img, (0, 0), 1.0, from_vehicle=False)
+    if not lines:
+        return ""
+    # Both engines read the same page: keep the one that produced more text.
+    by_engine: Dict[str, List[FrameText]] = {}
+    for ln in lines:
+        by_engine.setdefault(ln.engine, []).append(ln)
+    chosen = max(by_engine.values(), key=lambda g: sum(len(t.text) for t in g))
+    heights = sorted(t.bbox_px[3] - t.bbox_px[1] for t in chosen)
+    band = max(8, heights[len(heights) // 2] * 0.7)
+    rows: Dict[int, List[FrameText]] = {}
+    for t in chosen:
+        rows.setdefault(int(t.bbox_px[1] // band), []).append(t)
+    return "\n".join(" ".join(t.text for t in sorted(r, key=lambda t: t.bbox_px[0]))
+                     for _k, r in sorted(rows.items()))
 
 
 # Detector class names that read as conclusory are reported as shapes, never as

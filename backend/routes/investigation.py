@@ -34,6 +34,8 @@ from pydantic import BaseModel, Field
 from backend.database.db import get_db
 from backend.modules import audit_engine, auto_analysis, investigation_service as svc
 from backend.modules.report_engine import build_report_html
+from backend.modules.clue_terms import object_key
+from backend.modules.clue_text import match_key
 from backend.modules.vision import cv_engine
 from backend.modules.vision.objective_lexicon import enforce_objective_lexicon
 
@@ -399,3 +401,176 @@ async def review_queue(case_id: str, limit: int = Query(60, ge=1, le=300)) -> Di
     finally:
         await db.close()
     return {"items": items, "counts": counts}
+
+
+# ── transcripts & text for the whole case ─────────────────────────────────────
+
+def _term_key(kind: str, norm: str) -> str:
+    return object_key(norm) if kind == "OBJECT" else match_key(kind, norm)
+
+
+@router.get("/cases/{case_id}/transcripts")
+async def case_transcripts(case_id: str) -> Dict[str, Any]:
+    """
+    Every speech transcript, PDF text and PDF-OCR text in the case, with the
+    clues found in each passage and which of them also occur in OTHER evidence.
+    """
+    data = await _require_case(case_id)
+    ctx = data["ctx"]
+
+    # (evidence_id, kind, canonical key) -> matches that include that evidence
+    index: Dict[tuple, List[Dict[str, Any]]] = {}
+    for m in data["matches"]:
+        for mem in m["members"]:
+            key = (mem["evidence_id"], m["kind"], _term_key(m["kind"], mem.get("norm_value") or mem["value"]))
+            index.setdefault(key, []).append(m)
+
+    chunks_by_ev: Dict[str, List[Dict[str, Any]]] = {}
+    for ch in ctx["chunks"]:
+        chunks_by_ev.setdefault(ch["evidence_id"], []).append(ch)
+
+    out_evidence = []
+    for ev in ctx["evidence"]:
+        rows = []
+        for ch in chunks_by_ev.get(ev["id"], []):
+            terms = []
+            seen = set()
+            for c in svc.chunk_terms(ch.get("content") or ""):
+                value, norm, _ = svc._fix_plate(c.kind, c.value, c.norm, c.context)
+                if (c.kind, norm) in seen:
+                    continue
+                seen.add((c.kind, norm))
+                hits = index.get((ev["id"], c.kind, _term_key(c.kind, norm)), [])
+                terms.append({
+                    "kind": c.kind, "value": value,
+                    "matches": [{
+                        "id": m["id"], "strength": m["strength"], "score": m["score"],
+                        "also_in": sorted({x["file_name"] for x in m["members"] if x["evidence_id"] != ev["id"]}),
+                    } for m in hits],
+                })
+            st = ch.get("start_time")
+            et = ch.get("end_time")
+            rows.append({
+                "id": ch["id"], "text": ch.get("content") or "", "page": ch.get("page_number"),
+                "source": svc._chunk_source(ch.get("source_type")),
+                "ocr": str(ch.get("source_type") or "").upper() == "PDF_OCR",
+                "start_ms": int(float(st) * 1000) if st is not None else None,
+                "end_ms": int(float(et) * 1000) if et is not None else None,
+                "terms": terms,
+            })
+        out_evidence.append({
+            "evidence_id": ev["id"], "file_name": ev["file_name"], "file_type": ev["file_type"],
+            "analysis_status": ev.get("analysis_status") or "NOT_RUN",
+            "transcription_status": ev.get("transcription_status"),
+            "chunks": rows,
+            "matched_terms": sum(1 for r in rows for t in r["terms"] if t["matches"]),
+        })
+    return {"evidence": out_evidence,
+            "totals": {"passages": len(ctx["chunks"]),
+                       "matched_terms": sum(e["matched_terms"] for e in out_evidence)}}
+
+
+# ── global overview (Intelligence Strip) ──────────────────────────────────────
+
+_ACTION_TEXT = {
+    "UPLOAD_EVIDENCE": "Evidence uploaded",
+    "DELETE_EVIDENCE": "Evidence deleted",
+    "AUTO_ANALYSIS_COMPLETED": "Automatic analysis completed",
+    "VLM_ROI_SCAN": "Regional scan performed",
+    "FINDING_VERIFIED": "Finding verified by an investigator",
+    "FINDING_EDITED": "Finding edited (verification reset)",
+    "FINDING_VERIFICATION_REVOKED": "Finding verification revoked",
+    "DETECTION_REVIEWED": "Detection reviewed",
+    "REPORT_GENERATED": "Report generated",
+    "EVIDENCE_LOCATION_SET": "Evidence location set",
+    "EVIDENCE_HASH_RECORDED": "Evidence hash recorded",
+    "AUDIT_PAYLOAD_VIEWED": "Raw model output viewed",
+}
+
+
+@router.get("/overview")
+async def overview(max_cases: int = Query(12, ge=1, le=50)) -> Dict[str, Any]:
+    """
+    Real cross-case summary for the Intelligence Strip: strongest shared clues,
+    concrete gaps in the evidence, and recent activity from the custody log.
+    Nothing here is hypothesised — every item is computed from stored data.
+    """
+    db = await get_db()
+    try:
+        cur = await db.execute(
+            "SELECT id, case_number, title, status FROM cases ORDER BY updated_at DESC LIMIT %s", (max_cases,))
+        cases = [dict(r) for r in await cur.fetchall()]
+        await db.commit()
+    finally:
+        await db.close()
+
+    leads: List[Dict[str, Any]] = []
+    gaps: List[Dict[str, Any]] = []
+    stats = {"cases": len(cases), "evidence": 0, "clues": 0, "matches": 0}
+
+    for c in cases:
+        data = await svc.case_correlations(c["id"])
+        if not data:
+            continue
+        ctx, evidence = data["ctx"], data["evidence"]
+        stats["evidence"] += len(ctx["evidence"])
+        stats["clues"] += len(data["clues"])
+        stats["matches"] += len(data["matches"])
+        label = f"{c['case_number']}"
+
+        for m in data["matches"]:
+            if m["strength"] == "WEAK":
+                continue
+            leads.append({
+                "id": f"{c['id']}:{m['id']}", "case_id": c["id"], "case_number": c["case_number"],
+                "case_title": c["title"], "kind": m["kind"], "value": m["value"],
+                "strength": m["strength"], "score": m["score"], "match_type": m["match_type"],
+                "explanation": m["explanation"], "verified": m["verified"],
+                "files": sorted({x["file_name"] for x in m["members"]}),
+                "sources": [{"file": x["file_name"], "at": x["timestamp_str"], "source": x["source"],
+                             "reading": x["value"]} for x in m["members"]],
+            })
+
+        chunk_ev = {ch["evidence_id"] for ch in ctx["chunks"]}
+        n_unreviewed = sum(1 for d in ctx["detections"]
+                           if d.get("source") == "AUTO_YOLO" and d.get("verification_status") == "Unverified_Draft")
+        n_drafts = sum(1 for d in ctx["detections"]
+                       if d.get("source") == "VLM_ROI" and d.get("verification_status") != "Verified")
+
+        def gap(sev: str, text: str, kind: str) -> None:
+            gaps.append({"id": f"{c['id']}:{kind}:{len(gaps)}", "severity": sev, "text": text,
+                         "case_id": c["id"], "case_number": label, "kind": kind})
+
+        for e in ctx["evidence"]:
+            st = e.get("analysis_status") or "NOT_RUN"
+            if st in ("NOT_RUN", "FAILED"):
+                gap("high" if st == "FAILED" else "medium",
+                    f"{e['file_name']}: automatic analysis {'failed' if st == 'FAILED' else 'has not been run'}",
+                    "analysis")
+            if e["file_type"] in ("AUDIO", "VIDEO") and e["id"] not in chunk_ev \
+                    and (e.get("transcription_status") or "PENDING") != "TRANSCRIBED":
+                gap("low", f"{e['file_name']}: no speech transcript yet", "transcript")
+            if e["file_type"] == "DOCUMENT" and e["id"] not in chunk_ev:
+                gap("medium", f"{e['file_name']}: no text could be extracted", "document")
+            if e.get("latitude") is None and e["file_type"] in ("VIDEO", "IMAGE") and \
+                    any(e["id"] in m["evidence_ids"] for m in data["matches"] if m["strength"] != "WEAK"):
+                gap("low", f"{e['file_name']}: matches other evidence but has no location", "location")
+        if n_unreviewed:
+            gap("low", f"{n_unreviewed} automatic detection(s) await review", "review")
+        if n_drafts:
+            gap("medium", f"{n_drafts} regional-scan finding(s) are still unverified drafts", "drafts")
+
+    leads.sort(key=lambda x: -x["score"])
+    order = {"high": 0, "medium": 1, "low": 2}
+    gaps.sort(key=lambda g: order.get(g["severity"], 3))
+
+    rows = await audit_engine.list_entries(limit=15)
+    case_no = {c["id"]: c["case_number"] for c in cases}
+    activity = [{
+        "id": str(r["seq"]), "seq": r["seq"], "action": r["action"],
+        "text": _ACTION_TEXT.get(r["action"], r["action"].replace("_", " ").capitalize()),
+        "case_number": case_no.get(r.get("case_id")), "operator": r["operator_id"],
+        "time": r["timestamp_utc"],
+    } for r in rows]
+
+    return {"leads": leads[:30], "gaps": gaps[:40], "activity": activity, "stats": stats}

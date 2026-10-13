@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     AUTO_SCENE_OCR_MAX: int = 90
     AUTO_SCENE_FRAMES_PER_WINDOW: int = 2   # sharpest N frames OCR'd per window
     USE_GPU: bool = True                  # use CUDA when available
+    PDF_OCR_MIN_CHARS: int = 25           # a page with less text than this is OCR'd
+    PDF_MAX_PAGES: int = 60
+    PDF_OCR_ZOOM: float = 2.8             # render scale (~200 dpi) for scanned pages
     OCR_ENSEMBLE: bool = True             # second OCR engine (RapidOCR) votes with EasyOCR
     AUTO_MAX_PLATE_OCR: int = 60          # cap on OCR calls over vehicle/plate crops
 

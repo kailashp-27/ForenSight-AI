@@ -17,12 +17,14 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi.concurrency import run_in_threadpool
 
 from backend.modules import audit_engine, auto_analysis
+from backend.modules.clue_terms import extract_terms
 from backend.modules.clue_text import extract_clues, normalize
 from backend.modules.correlation_engine import correlate
 from backend.modules.plate_postprocess import parse_plate
@@ -252,20 +254,19 @@ async def _persist(ev: Dict[str, Any], result) -> Dict[str, int]:
                                    f"{c['context']} (read {c['count']}x)")
                 counts["text_clues"] += 1
 
-            # PDF text → chunks + clues
+            # PDF text -> chunks only; clues are derived live from chunks at read time,
+            # so they always reflect the current text (and later edits/transcripts).
             if result.pages:
-                await db.execute("DELETE FROM text_chunks WHERE evidence_id=%s AND source_type='PDF'", (evidence_id,))
+                await db.execute(
+                    "DELETE FROM text_chunks WHERE evidence_id=%s AND source_type IN ('PDF','PDF_OCR')",
+                    (evidence_id,))
                 for i, (page_no, text) in enumerate(result.pages):
+                    stype = "PDF_OCR" if page_no in getattr(result, "ocr_pages", set()) else "PDF"
                     await db.execute(
                         """INSERT INTO text_chunks (id, evidence_id, chunk_index, content, source_type, page_number)
-                           VALUES (%s,%s,%s,%s,'PDF',%s)""",
-                        (_uid(), evidence_id, i, text[:20000], page_no))
+                           VALUES (%s,%s,%s,%s,%s,%s)""",
+                        (_uid(), evidence_id, i, text[:20000], stype, page_no))
                     counts["document_pages"] += 1
-                    for c in extract_clues(text):
-                        val, nrm, ctx = _fix_plate(c.kind, c.value, c.norm, f"page {page_no}: {c.context}")
-                        await _insert_clue(db, case_id, evidence_id, c.kind, val, nrm,
-                                           0.9, "DOCUMENT", None, None, ctx)
-                        counts["text_clues"] += 1
 
             # EXIF location / capture time (never overwrite a manually set location)
             if result.exif:
@@ -280,16 +281,6 @@ async def _persist(ev: Dict[str, Any], result) -> Dict[str, int]:
                      "EXIF GPS" if ex.get("latitude") is not None else None,
                      ex.get("captured_at"), evidence_id))
 
-        # Transcript chunks (audio/video) → clues
-        cur = await db.execute(
-            "SELECT content, start_time FROM text_chunks WHERE evidence_id=%s AND source_type<>'PDF'",
-            (evidence_id,))
-        for row in await cur.fetchall():
-            for c in extract_clues(row["content"] or ""):
-                ts = int(float(row["start_time"]) * 1000) if row["start_time"] is not None else None
-                await _insert_clue(db, case_id, evidence_id, c.kind, c.value, c.norm,
-                                   0.6, "TRANSCRIPT", ts, None, c.context)
-                counts["transcript_clues"] += 1
         await db.commit()
     except Exception:
         await db.conn.rollback()
@@ -339,16 +330,44 @@ async def load_case_context(case_id: str) -> Dict[str, Any]:
             """SELECT d.* FROM detections d JOIN evidence e ON e.id=d.evidence_id
                WHERE e.case_id=%s ORDER BY d.evidence_id, d.frame_timestamp""", (case_id,))
         detections = [dict(r) for r in await cur.fetchall()]
+        cur = await db.execute(
+            """SELECT t.id, t.evidence_id, t.chunk_index, t.content, t.source_type, t.page_number,
+                      t.start_time, t.end_time
+               FROM text_chunks t JOIN evidence e ON e.id=t.evidence_id
+               WHERE e.case_id=%s ORDER BY t.evidence_id, t.chunk_index""", (case_id,))
+        chunks = [dict(r) for r in await cur.fetchall()]
         await db.commit()
     finally:
         await db.close()
-    return {"case": dict(case), "evidence": evidence, "clues": clues, "detections": detections}
+    return {"case": dict(case), "evidence": evidence, "clues": clues,
+            "detections": detections, "chunks": chunks}
+
+
+def _chunk_source(source_type: Optional[str]) -> str:
+    return "DOCUMENT" if str(source_type or "").upper().startswith("PDF") else "TRANSCRIPT"
+
+
+def chunk_terms(content: str):
+    """Every clue (patterns + names + object phrases) found in one text chunk."""
+    return extract_clues(content or "") + extract_terms(content or "")
 
 
 def _clue_dicts(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Clue rows + operator ROI findings, normalised for the correlation engine."""
+    """
+    The complete clue pool for a case, normalised for the correlation engine:
+
+      * persisted clues from automatic analysis (objects, OCR, plates, EXIF)
+      * clues derived LIVE from every text chunk (speech transcripts, PDF text,
+        PDF OCR) — derived at read time so a transcript created after analysis
+        is still picked up and nothing goes stale
+      * clues derived LIVE from operator regional scans (label, readout, notes)
+    """
     out: List[Dict[str, Any]] = []
+
+    # 1. persisted clues (transcript/document ones are re-derived live below)
     for c in ctx["clues"]:
+        if c["source"] in ("TRANSCRIPT", "DOCUMENT"):
+            continue
         bbox = None
         if c.get("bbox"):
             try:
@@ -361,26 +380,83 @@ def _clue_dicts(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "timestamp_ms": c["timestamp_ms"], "context": c["context"],
                     "bbox": bbox, "verified": False})
 
+    # 2. text chunks -> clues (one clue per evidence/kind/value, earliest occurrence)
+    seen: Dict[tuple, Dict[str, Any]] = {}
+    for ch in ctx.get("chunks", []):
+        source = _chunk_source(ch.get("source_type"))
+        ts = int(float(ch["start_time"]) * 1000) if ch.get("start_time") is not None else None
+        where = f"page {ch['page_number']}: " if ch.get("page_number") else ""
+        for c in chunk_terms(ch.get("content") or ""):
+            value, norm, context = _fix_plate(c.kind, c.value, c.norm, c.context)
+            key = (ch["evidence_id"], c.kind, norm)
+            if key in seen:
+                seen[key]["_n"] += 1
+                continue
+            d = {"id": f"chunk:{ch['id']}:{c.kind}:{norm}"[:190], "evidence_id": ch["evidence_id"],
+                 "kind": c.kind, "value": value, "norm_value": norm,
+                 "confidence": 0.9 if source == "DOCUMENT" else 0.6, "source": source,
+                 "timestamp_ms": ts, "context": where + context, "bbox": None,
+                 "verified": False, "chunk_id": ch["id"], "_n": 1}
+            seen[key] = d
+            out.append(d)
+    for d in seen.values():
+        n = d.pop("_n", 1)
+        if n > 1:
+            d["context"] = f"{d['context']} (mentioned {n}x)"
+
+    # 3. operator regional scans -> clues
     for d in ctx["detections"]:
         if d.get("source") != "VLM_ROI":
             continue
         verified = d.get("verification_status") == "Verified"
         ts = int(float(d.get("frame_timestamp") or 0) * 1000)
-        if d.get("category") in ("VEHICLE", "OBJECT", "ANOMALY"):
-            out.append({"id": f"roi:{d['id']}:obj", "evidence_id": d["evidence_id"], "kind": "OBJECT",
-                        "value": d["label"], "norm_value": (d["label"] or "").lower(),
-                        "confidence": d["confidence"], "source": "VLM_ROI", "timestamp_ms": ts,
-                        "context": "Operator-selected region analysed by local VLM",
-                        "bbox": None, "verified": verified})
-        ro = (d.get("readout_text") or "").strip()
-        if ro and ro.upper() != "NONE":
-            for c in extract_clues(ro):
-                out.append({"id": f"roi:{d['id']}:{c.norm}", "evidence_id": d["evidence_id"],
-                            "kind": c.kind, "value": c.value, "norm_value": c.norm,
-                            "confidence": d["confidence"], "source": "VLM_ROI", "timestamp_ms": ts,
-                            "context": f"ROI readout: {ro}", "bbox": None, "verified": verified})
-    # People are never matched on appearance alone.
-    return [c for c in out if not (c["kind"] == "OBJECT" and "person" in (c["norm_value"] or ""))]
+        conf = float(d.get("confidence") or 0)
+        base = {"evidence_id": d["evidence_id"], "confidence": conf, "source": "VLM_ROI",
+                "timestamp_ms": ts, "bbox": None, "verified": verified}
+        label = (d.get("label") or "").strip()
+        readout = (d.get("readout_text") or "").strip()
+        try:
+            details = [str(x) for x in json.loads(d.get("details_json") or "[]")]
+        except (TypeError, json.JSONDecodeError):
+            details = []
+        note = f"Operator-selected region analysed by local VLM: {label}"
+
+        # the described object itself (people are never matched on appearance)
+        if label and d.get("category") != "PERSON":
+            out.append({**base, "id": f"roi:{d['id']}:obj", "kind": "OBJECT", "value": label,
+                        "norm_value": label.lower(), "context": note})
+
+        # visible text: patterns first, otherwise keep the readout itself as a TEXT clue
+        if readout and readout.upper() != "NONE":
+            pattern = extract_clues(readout)
+            for c in pattern:
+                v, n, ctx_note = _fix_plate(c.kind, c.value, c.norm, f"ROI readout: {readout}")
+                out.append({**base, "id": f"roi:{d['id']}:{c.kind}:{n}", "kind": c.kind, "value": v,
+                            "norm_value": n, "context": ctx_note})
+            alnum = re.sub(r"[^A-Z0-9]", "", readout.upper())
+            if not pattern and len(alnum) >= 4:
+                out.append({**base, "id": f"roi:{d['id']}:text:{alnum}", "kind": "TEXT",
+                            "value": readout, "norm_value": alnum, "context": f"ROI readout: {readout}"})
+
+        # Names / object phrases in the model's notes. The label is already an
+        # OBJECT clue above, so from the label only NAMES are taken (no duplicate).
+        terms = [c for c in extract_terms(label) if c.kind == "NAME"]
+        terms += extract_terms(" . ".join(details))
+        seen_terms = set()
+        for c in terms:
+            if (c.kind, c.norm) in seen_terms:
+                continue
+            seen_terms.add((c.kind, c.norm))
+            out.append({**base, "id": f"roi:{d['id']}:{c.kind}:{c.norm}", "kind": c.kind,
+                        "value": c.value, "norm_value": c.norm,
+                        "context": f"Regional scan note: {c.context}"})
+
+    # de-duplicate ids, drop person-appearance objects
+    uniq: Dict[str, Dict[str, Any]] = {}
+    for c in out:
+        uniq.setdefault(c["id"], c)
+    return [c for c in uniq.values()
+            if not (c["kind"] == "OBJECT" and "person" in (c["norm_value"] or "").split())]
 
 
 async def case_correlations(case_id: str) -> Dict[str, Any]:

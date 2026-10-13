@@ -173,3 +173,27 @@ python -m backend.training.cli train  --data data/yolo_case/data.yaml --epochs 4
 
 Fine-tuning needs hundreds of reviewed boxes covering ALL classes you care about; a narrow dataset makes the
 model forget the rest. First run downloads: yolov8s (22 MB), YOLO-World (~50 MB) and CLIP (~340 MB), then offline.
+
+
+---
+
+## One clue pool: speech, documents and regional scans
+
+Every evidence item feeds the **same** clue pool, derived at read time so nothing goes stale:
+
+| Source | What becomes a clue |
+|---|---|
+| Speech transcripts (Whisper) | plates, phones, e-mails, IDs, **names**, **object descriptions** ("white van", "black backpack") |
+| PDF text, and **OCR of scanned/photographed pages** | same as above |
+| Regional scans (VLM) | the object label, visible text, and names/objects in the model's notes |
+| Video / photo analysis | tracked objects, plates (voted), on-screen text, EXIF |
+
+Investigation board tabs: **Matching clues**, **All clues** (click "Clues extracted"; filter by type/source,
+see which clues are shared), **Transcripts & text** (every passage, clues highlighted, amber where the same
+clue appears in other evidence), Review detections, Map, Graph, Report.
+
+Matching notes: names and free text are rated at most MEDIUM; appearance-only matches are WEAK; a vehicle
+mentioned in speech without a colour is not matched (a bare "car" would match every car).
+
+The dashboard **Intelligence Strip** is live: Leads = strongest shared clues across cases, Gaps = concrete
+unfinished/missing items, Activity = recent custody-log entries. There are no hypotheses or hard-coded items.

@@ -30,7 +30,8 @@ _PATTERNS = [
     # UK current format: AB12 CDE
     ("PLATE", "plate_uk", re.compile(r"\b[A-Z]{2}\d{2}[\s-]?[A-Z]{3}\b")),
     # Generic 2-3 letters + 3-4 digits: ABC-1234, KA 4821
-    ("PLATE", "plate_generic", re.compile(r"\b[A-Z]{2,3}[\s-]?\d{3,4}\b")),
+    # Not when it is just the head of a longer reference such as "FS-2026-001".
+    ("PLATE", "plate_generic", re.compile(r"\b[A-Z]{2,3}[\s-]?\d{3,4}\b(?![\s-]?\d)")),
     ("EMAIL", "email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")),
     ("PHONE", "phone", re.compile(r"(?<![\w.])(?:\+?\d{1,3}[\s-]?)?(?:\d[\s-]?){9,11}\d(?![\w])")),
     ("AMOUNT", "amount", re.compile(r"(?:₹|Rs\.?|INR|\$|€|£)\s?\d[\d,]*(?:\.\d{1,2})?")),

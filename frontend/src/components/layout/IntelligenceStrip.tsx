@@ -1,349 +1,186 @@
 // frontend/src/components/layout/IntelligenceStrip.tsx
-import React, { useState, useEffect, useRef } from "react";
+// Intelligence strip: REAL cross-case data only.
+//   Leads    — strongest clues shared between evidence items (correlation engine)
+//   Gaps     — concrete things missing/unfinished in the evidence
+//   Activity — recent entries from the tamper-evident custody log
+// Nothing here is hypothesised or hard-coded; it all comes from /api/v1/overview.
+
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
-  ChevronUp, ChevronDown, Zap, Brain, AlertCircle,
-  Clock, TrendingUp, User, Monitor, Globe, CheckCircle,
+  ChevronUp, ChevronDown, Zap, AlertCircle, Clock, Brain, CheckCircle, FileSearch, Loader2, RefreshCw,
 } from "lucide-react";
-import { ContextPanel, type ContextPanelItem } from "./ContextPanel";
+import { type ContextPanelItem } from "./ContextPanel";
 import { getSocket } from "../../services/socket";
+import { caseViewsApi, type Overview, type OverviewLead } from "../../services/forensicApi";
 
-/* ── Mock Data ────────────────────────────────────────────────────────────── */
-const INITIAL_LEADS: ContextPanelItem[] = [
-  {
-    id: "L001",
-    title: "Unusual login pattern — User KP-2234",
-    subtitle: "23 logins in 4 hours from 7 different IP addresses",
-    type: "lead", risk: "high", confidence: 91,
-    timestamp: "2026-08-19 03:41",
-    aiReasoning:
-      "The login velocity (23 in 4h) exceeds the user's 30-day baseline by 8.3×. " +
-      "IP clustering analysis shows 5 of 7 IPs belong to known VPN exit nodes. " +
-      "Temporal pattern aligns with known account-takeover sequences in the fraud dataset.",
-    details: {
-      "User ID": "KP-2234",
-      "IP Range": "45.32.x.x / 192.168.x.x",
-      "Time Range": "00:12 – 03:41 UTC",
-      "Logins": "23",
-      "Unique IPs": "7",
-    },
-    relatedItems: [
-      { label: "Case", value: "CASE-2026-001" },
-      { label: "Evidence", value: "access_log_aug19.csv" },
-      { label: "Cluster", value: "IP-CLUSTER-04" },
-    ],
-  },
-  {
-    id: "L002",
-    title: "Transaction cluster — ₹4.7L split payments",
-    subtitle: "14 transactions below ₹50,000 threshold in 6h",
-    type: "lead", risk: "high", confidence: 87,
-    timestamp: "2026-08-19 08:15",
-    aiReasoning:
-      "Structuring pattern detected: 14 transfers averaging ₹33,571 in a 6-hour window. " +
-      "All transfers originated from ACC-887 and were distributed to 6 distinct accounts " +
-      "with no prior relationship. This aligns with smurfing behaviour in PMLA guidelines.",
-    details: {
-      "Source Account": "ACC-887",
-      "Total Amount": "₹4,70,000",
-      "Transactions": "14",
-      "Time Window": "6 hours",
-      "Recipients": "6 accounts",
-    },
-    relatedItems: [
-      { label: "Case", value: "CASE-2026-001" },
-      { label: "Pattern", value: "SMURFING-v2" },
-    ],
-  },
-  {
-    id: "L003",
-    title: "CCTV frame — Unidentified object detected",
-    subtitle: "YOLOv8 detected firearm-like object at 02:14:33",
-    type: "lead", risk: "high", confidence: 78,
-    timestamp: "2026-08-19 02:14",
-    aiReasoning:
-      "YOLOv8 (confidence 78.3%) flagged a pistol-shaped silhouette in frame 3,260. " +
-      "Grad-CAM heatmap shows activation concentrated on the right hand of subject. " +
-      "REVIEW REQUIRED — human verification mandatory before any legal inference.",
-    details: {
-      "File": "CCTV_lobby_aug19.mp4",
-      "Frame": "3260",
-      "Timestamp": "02:14:33",
-      "Detection": "Possible firearm",
-      "Confidence": "78.3%",
-    },
-    relatedItems: [
-      { label: "Evidence", value: "CCTV_lobby_aug19.mp4" },
-      { label: "Grad-CAM", value: "heatmap_frame3260.png" },
-    ],
-  },
-  {
-    id: "L004",
-    title: "5 accounts — potential shared operator",
-    subtitle: "Behavioral fingerprinting shows 94% similarity",
-    type: "lead", risk: "medium", confidence: 76,
-    timestamp: "2026-08-18 22:30",
-    aiReasoning:
-      "Device fingerprinting and typing-cadence analysis across 5 accounts show 94% " +
-      "cosine similarity in behavioral vectors. Session overlap analysis confirms " +
-      "at least 3 accounts were active simultaneously from the same device.",
-    details: {
-      "Accounts": "5",
-      "Similarity": "94%",
-      "Overlap": "3 concurrent",
-      "Device ID": "DEVF-4420",
-    },
-    relatedItems: [
-      { label: "Cluster", value: "BEHAV-CLUSTER-01" },
-      { label: "Case", value: "CASE-2026-001" },
-    ],
-  },
-];
-
-const MOCK_HYPOTHESES = [
-  { id: "H001", text: "User KP-2234 is operating a mule account network", evidence: 8, confidence: 74, status: "exploring" },
-  { id: "H002", text: "ACC-887 is the primary layering account in a 3-tier structure", evidence: 12, confidence: 81, status: "exploring" },
-  { id: "H003", text: "The 5 flagged accounts share a single physical operator", evidence: 5, confidence: 63, status: "exploring" },
-  { id: "H004", text: "CCTV lobby footage is unrelated to financial fraud", evidence: 3, confidence: 45, status: "rejected" },
-];
-
-const MOCK_GAPS = [
-  { id: "G001", text: "No device metadata for IP 45.32.118.204 — VPN endpoint", severity: "high" },
-  { id: "G002", text: "14-minute gap in CCTV recording between 02:00–02:14", severity: "high" },
-  { id: "G003", text: "ACC-887 beneficiary details not yet verified with bank", severity: "medium" },
-  { id: "G004", text: "Audio evidence from interview has not been transcribed", severity: "low" },
-];
-
-const MOCK_ACTIVITY = [
-  { id: "A001", text: 'Analyst KP tagged Lead L001 as "Priority"', time: "2 min ago", icon: "tag" },
-  { id: "A002", text: "AI clustered 14 transactions into Incident #45", time: "18 min ago", icon: "ai" },
-  { id: "A003", text: "CCTV_lobby_aug19.mp4 — YOLOv8 analysis complete", time: "34 min ago", icon: "check" },
-  { id: "A004", text: "Hypothesis H002 evidence count updated to 12", time: "1 hr ago", icon: "update" },
-  { id: "A005", text: "Case CASE-2026-001 status changed to UNDER REVIEW", time: "2 hr ago", icon: "flag" },
-];
-
-/* ── Sub-components ──────────────────────────────────────────────────────── */
-type Tab = "leads" | "hypotheses" | "gaps" | "activity";
+type Tab = "leads" | "gaps" | "activity";
 
 const RISK_CONFIG = {
-  high: { color: "#ef4444", bg: "rgba(239,68,68,0.1)", label: "HIGH" },
-  medium: { color: "#f59e0b", bg: "rgba(245,158,11,0.1)", label: "MED" },
+  high: { color: "#ef4444", bg: "rgba(239,68,68,0.1)", label: "STRONG" },
+  medium: { color: "#f59e0b", bg: "rgba(245,158,11,0.1)", label: "MEDIUM" },
   low: { color: "#10b981", bg: "rgba(16,185,129,0.1)", label: "LOW" },
 };
 
-function LeadsTab({ leads, onSelect }: { leads: ContextPanelItem[], onSelect: (item: ContextPanelItem, list: ContextPanelItem[]) => void }) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-        alignItems: "start",
-        alignContent: "start",
-        gap: "0.625rem",
-        padding: "0.75rem 1rem",
-        overflowY: "auto",
-        flex: 1,
-      }}
-    >
-      {leads.map((lead) => (
-        <div
-          key={lead.id}
-          className={`lead-card risk-${lead.risk}`}
-          onClick={() => onSelect(lead, leads)}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => e.key === "Enter" && onSelect(lead, leads)}
-          aria-label={`Open lead: ${lead.title}`}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-            <p
-              style={{
-                fontSize: "0.78rem", fontWeight: 600,
-                color: "var(--color-text-primary)", lineHeight: 1.35, flex: 1,
-              }}
-            >
-              {lead.title}
-            </p>
-            {lead.risk && (
-              <span
-                style={{
-                  padding: "0.1rem 0.4rem", borderRadius: 4, flexShrink: 0,
-                  fontSize: "0.6rem", fontWeight: 700, letterSpacing: "0.06em",
-                  background: RISK_CONFIG[lead.risk].bg,
-                  color: RISK_CONFIG[lead.risk].color,
-                }}
-              >
-                {RISK_CONFIG[lead.risk].label}
-              </span>
-            )}
-          </div>
-          <p style={{ fontSize: "0.7rem", color: "var(--color-text-muted)", marginTop: 4, lineHeight: 1.4 }}>
-            {lead.subtitle}
-          </p>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
-            <div className="confidence-bar" style={{ flex: 1, marginRight: 8 }}>
-              <div
-                className="confidence-fill"
-                style={{
-                  width: `${lead.confidence}%`,
-                  background: (lead.confidence ?? 0) >= 80 ? "#ef4444" : (lead.confidence ?? 0) >= 60 ? "#f59e0b" : "#10b981",
-                }}
-              />
-            </div>
-            <span
-              style={{
-                fontSize: "0.6875rem", fontWeight: 700,
-                fontFamily: "monospace",
-                color: "var(--color-text-muted)",
-              }}
-            >
-              {lead.confidence}%
-            </span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
-            <span style={{ fontSize: "0.65rem", color: "var(--color-text-subtle)", fontFamily: "monospace" }}>
-              {lead.timestamp}
-            </span>
-            <span style={{ fontSize: "0.65rem", color: "var(--color-accent)" }}>
-              Open →
-            </span>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+const SEV: Record<string, { color: string; bg: string }> = {
+  high: { color: "#ef4444", bg: "rgba(239,68,68,0.1)" },
+  medium: { color: "#f59e0b", bg: "rgba(245,158,11,0.1)" },
+  low: { color: "#10b981", bg: "rgba(16,185,129,0.1)" },
+};
+
+function relTime(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return iso;
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} hr ago`;
+  return `${Math.floor(s / 86400)} d ago`;
 }
 
-function HypothesesTab({ onSelect }: { onSelect: (item: ContextPanelItem, list: ContextPanelItem[]) => void }) {
-  const STATUS_COLOR: Record<string, string> = { exploring: "#3b82f6", validated: "#10b981", rejected: "#6b7280" };
-
-  const mappedHypotheses: ContextPanelItem[] = MOCK_HYPOTHESES.map(h => ({
-    id: h.id,
-    title: h.text,
-    type: "hypothesis",
-    confidence: h.confidence,
+function leadToItem(l: OverviewLead): ContextPanelItem {
+  return {
+    id: l.id,
+    type: "lead",
+    title: `${l.kind}: ${l.value}`,
+    subtitle: `Appears in ${l.files.length} evidence items — ${l.files.join(", ")}`,
+    risk: l.strength === "STRONG" ? "high" : l.strength === "MEDIUM" ? "medium" : "low",
+    confidence: Math.round(l.score * 100),
+    timestamp: `${l.case_number}`,
+    aiReasoning: l.explanation,
     details: {
-      "Status": h.status,
-      "Evidence Count": h.evidence.toString(),
-    }
-  }));
+      Case: `${l.case_number} — ${l.case_title}`,
+      "Match type": l.match_type.replace("_", " "),
+      Strength: l.strength,
+      "Investigator-verified": l.verified ? "Yes" : "No — needs review",
+    },
+    relatedItems: l.sources.map((s) => ({
+      label: `${s.file}${s.at ? ` @ ${s.at}` : ""}`,
+      value: `${s.reading}${s.source ? ` (${s.source})` : ""}`,
+    })),
+  };
+}
 
+function Empty({ icon, title, hint }: { icon: React.ReactNode; title: string; hint: string }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0.75rem 1rem", overflowY: "auto", flex: 1 }}>
-      {mappedHypotheses.map((h, i) => (
-        <div
-          key={h.id}
-          className="tab-card-hoverable"
-          style={{
-            background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)",
-            borderRadius: 8, padding: "0.625rem 0.875rem",
-            display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: 12,
-            cursor: "pointer", transition: "border-color 0.15s, background 0.15s",
-          }}
-          onClick={() => onSelect(h, mappedHypotheses)}
-        >
-          <div>
-            <p style={{ fontSize: "0.78rem", color: "var(--color-text-primary)", lineHeight: 1.4 }}>
-              {h.title}
-            </p>
-            <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
-              <span style={{ fontSize: "0.65rem", color: "var(--color-text-muted)" }}>
-                {h.details!["Evidence Count"]} evidence
-              </span>
-              <span style={{ width: 3, height: 3, borderRadius: "50%", background: "var(--color-text-subtle)" }} />
-              <span
-                style={{
-                  fontSize: "0.65rem", fontWeight: 600,
-                  color: STATUS_COLOR[h.details!["Status"]] ?? "var(--color-text-muted)",
-                  textTransform: "capitalize",
-                }}
-              >
-                {h.details!["Status"]}
-              </span>
-            </div>
-          </div>
-          <div style={{ textAlign: "right" }}>
-            <span
-              style={{
-                fontSize: "0.875rem", fontWeight: 700, fontFamily: "monospace",
-                color: (h.confidence ?? 0) >= 70 ? "#f59e0b" : "var(--color-text-muted)",
-              }}
-            >
-              {h.confidence}%
-            </span>
-          </div>
-        </div>
-      ))}
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                  padding: "1rem", textAlign: "center", color: "var(--color-text-subtle)" }}>
+      <div style={{ opacity: 0.6, marginBottom: 6 }}>{icon}</div>
+      <p style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text-muted)" }}>{title}</p>
+      <p style={{ fontSize: "0.7rem", marginTop: 3, maxWidth: 360 }}>{hint}</p>
     </div>
   );
 }
 
-function GapsTab() {
-  const SEV: Record<string, { color: string; bg: string }> = {
-    high: { color: "#ef4444", bg: "rgba(239,68,68,0.1)" },
-    medium: { color: "#f59e0b", bg: "rgba(245,158,11,0.1)" },
-    low: { color: "#10b981", bg: "rgba(16,185,129,0.1)" },
-  };
+function LeadsTab({ leads, onSelect }: { leads: OverviewLead[]; onSelect: (i: ContextPanelItem, l: ContextPanelItem[]) => void }) {
+  const items = leads.map(leadToItem);
+  if (!items.length) {
+    return (
+      <Empty
+        icon={<Zap size={24} />}
+        title="No shared clues yet"
+        hint="A lead appears when the same plate, phone number, name or ID shows up in two or more evidence items. Run automatic analysis on a case."
+      />
+    );
+  }
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", alignItems: "start",
+                  alignContent: "start", gap: "0.625rem", padding: "0.75rem 1rem", overflowY: "auto", flex: 1 }}>
+      {items.map((lead, idx) => {
+        const cfg = RISK_CONFIG[(lead.risk as keyof typeof RISK_CONFIG) ?? "low"] ?? RISK_CONFIG.low;
+        return (
+          <div
+            key={lead.id}
+            className={`lead-card risk-${lead.risk}`}
+            onClick={() => onSelect(lead, items)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => e.key === "Enter" && onSelect(lead, items)}
+            aria-label={`Open lead: ${lead.title}`}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+              <p style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--color-text-primary)", lineHeight: 1.35, flex: 1,
+                          wordBreak: "break-word" }}>
+                {lead.title}
+              </p>
+              <span style={{ padding: "0.1rem 0.4rem", borderRadius: 4, flexShrink: 0, fontSize: "0.6rem", fontWeight: 700,
+                             letterSpacing: "0.06em", background: cfg.bg, color: cfg.color }}>
+                {cfg.label}
+              </span>
+            </div>
+            <p style={{ fontSize: "0.7rem", color: "var(--color-text-muted)", marginTop: 4, lineHeight: 1.4 }}>{lead.subtitle}</p>
+            <div style={{ display: "flex", alignItems: "center", marginTop: 8 }}>
+              <div className="confidence-bar" style={{ flex: 1, marginRight: 8 }}>
+                <div className="confidence-fill" style={{ width: `${lead.confidence}%`, background: cfg.color }} />
+              </div>
+              <span style={{ fontSize: "0.6875rem", fontWeight: 700, fontFamily: "monospace", color: "var(--color-text-muted)" }}>
+                {lead.confidence}%
+              </span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+              <span style={{ fontSize: "0.65rem", color: "var(--color-text-subtle)", fontFamily: "monospace" }}>
+                {lead.timestamp}{leads[idx]?.verified ? " · verified" : " · needs review"}
+              </span>
+              <span style={{ fontSize: "0.65rem", color: "var(--color-accent)" }}>Open →</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function GapsTab({ gaps }: { gaps: Overview["gaps"] }) {
+  if (!gaps.length) {
+    return <Empty icon={<CheckCircle size={24} />} title="No gaps detected"
+                  hint="Every evidence item has been analysed and has the text and metadata it can have." />;
+  }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0.75rem 1rem", overflowY: "auto", flex: 1 }}>
-      {MOCK_GAPS.map((g) => (
-        <div
+      {gaps.map((g) => (
+        <Link
           key={g.id}
-          style={{
-            background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)",
-            borderLeft: `3px solid ${SEV[g.severity].color}`,
-            borderRadius: 8, padding: "0.625rem 0.875rem",
-            display: "flex", gap: 10, alignItems: "flex-start",
-          }}
+          to={`/cases/${g.case_id}/investigation`}
+          style={{ textDecoration: "none", background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)",
+                   borderLeft: `3px solid ${SEV[g.severity].color}`, borderRadius: 8, padding: "0.625rem 0.875rem",
+                   display: "flex", gap: 10, alignItems: "flex-start" }}
         >
           <AlertCircle style={{ width: 13, height: 13, color: SEV[g.severity].color, flexShrink: 0, marginTop: 2 }} />
           <div style={{ flex: 1 }}>
-            <p style={{ fontSize: "0.78rem", color: "var(--color-text-body)", lineHeight: 1.4 }}>
-              {g.text}
-            </p>
+            <p style={{ fontSize: "0.78rem", color: "var(--color-text-body)", lineHeight: 1.4 }}>{g.text}</p>
+            <span style={{ fontSize: "0.65rem", fontFamily: "monospace", color: "var(--color-text-subtle)" }}>{g.case_number}</span>
           </div>
-          <span
-            style={{
-              padding: "0.1rem 0.4rem", borderRadius: 4, flexShrink: 0,
-              fontSize: "0.6rem", fontWeight: 700, letterSpacing: "0.06em",
-              background: SEV[g.severity].bg, color: SEV[g.severity].color,
-            }}
-          >
+          <span style={{ padding: "0.1rem 0.4rem", borderRadius: 4, flexShrink: 0, fontSize: "0.6rem", fontWeight: 700,
+                         letterSpacing: "0.06em", background: SEV[g.severity].bg, color: SEV[g.severity].color }}>
             {g.severity.toUpperCase()}
           </span>
-        </div>
+        </Link>
       ))}
     </div>
   );
 }
 
-function ActivityTab() {
+function ActivityTab({ activity }: { activity: Overview["activity"] }) {
+  if (!activity.length) {
+    return <Empty icon={<Clock size={24} />} title="No activity yet" hint="Uploads, scans, reviews and reports are recorded here." />;
+  }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem", padding: "0.75rem 1rem", overflowY: "auto", flex: 1 }}>
-      {MOCK_ACTIVITY.map((a) => (
-        <div
-          key={a.id}
-          style={{
-            display: "flex", gap: 10, alignItems: "flex-start",
-            padding: "0.5rem 0", borderBottom: "1px solid var(--color-border-subtle)",
-          }}
-        >
-          <div
-            style={{
-              width: 24, height: 24, borderRadius: 6, flexShrink: 0,
-              background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}
-          >
-            {a.icon === "ai" && <Brain style={{ width: 11, height: 11, color: "var(--color-accent)" }} />}
-            {a.icon === "check" && <CheckCircle style={{ width: 11, height: 11, color: "#10b981" }} />}
-            {a.icon === "update" && <TrendingUp style={{ width: 11, height: 11, color: "#f59e0b" }} />}
-            {a.icon === "tag" && <User style={{ width: 11, height: 11, color: "var(--color-text-muted)" }} />}
-            {a.icon === "flag" && <Globe style={{ width: 11, height: 11, color: "var(--color-text-muted)" }} />}
+      {activity.map((a) => (
+        <div key={a.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "0.5rem 0",
+                                 borderBottom: "1px solid var(--color-border-subtle)" }}>
+          <div style={{ width: 24, height: 24, borderRadius: 6, flexShrink: 0, background: "var(--color-bg-elevated)",
+                        border: "1px solid var(--color-border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {a.action.includes("ANALYSIS") ? <Brain style={{ width: 11, height: 11, color: "var(--color-accent)" }} />
+              : a.action.includes("VERIFIED") || a.action.includes("REVIEWED") ? <CheckCircle style={{ width: 11, height: 11, color: "#10b981" }} />
+              : <FileSearch style={{ width: 11, height: 11, color: "var(--color-text-muted)" }} />}
           </div>
           <div style={{ flex: 1 }}>
-            <p style={{ fontSize: "0.76rem", color: "var(--color-text-body)", lineHeight: 1.4 }}>{a.text}</p>
+            <p style={{ fontSize: "0.76rem", color: "var(--color-text-body)", lineHeight: 1.4 }}>
+              {a.text}{a.case_number ? ` — ${a.case_number}` : ""}
+            </p>
             <span style={{ fontSize: "0.65rem", fontFamily: "monospace", color: "var(--color-text-subtle)", marginTop: 2, display: "block" }}>
-              {a.time}
+              {relTime(a.time)} · {a.operator}
             </span>
           </div>
         </div>
@@ -352,28 +189,45 @@ function ActivityTab() {
   );
 }
 
-/* ── Main Component ──────────────────────────────────────────────────────── */
 interface IntelligenceStripProps {
   contextItem: ContextPanelItem | null;
   onContextSelect: (item: ContextPanelItem, list: ContextPanelItem[]) => void;
   onContextClose: () => void;
 }
 
-export function IntelligenceStrip({ contextItem, onContextSelect, onContextClose }: IntelligenceStripProps) {
+export function IntelligenceStrip({ contextItem, onContextSelect }: IntelligenceStripProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("leads");
-  const [leads, setLeads] = useState<ContextPanelItem[]>(INITIAL_LEADS);
+  const [data, setData] = useState<Overview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    const socket = getSocket();
-    const handleNewLead = (newLead: any) => {
-      setLeads((prev) => [newLead, ...prev]);
-    };
-    socket.on("intelligence:new_lead", handleNewLead);
-    return () => {
-      socket.off("intelligence:new_lead", handleNewLead);
-    };
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setData(await caseViewsApi.overview());
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  // Initial load, refresh every 60 s, and whenever background processing finishes.
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => void load(), 60_000);
+    const socket = getSocket();
+    const onStatus = (p: { status?: string }) => {
+      if (p?.status === "COMPLETED" || p?.status === "FAILED") void load();
+    };
+    socket.on("evidence:status_update", onStatus);
+    return () => {
+      window.clearInterval(timer);
+      socket.off("evidence:status_update", onStatus);
+    };
+  }, [load]);
 
   const [height, setHeight] = useState(250);
   const [isDragging, setIsDragging] = useState(false);
@@ -391,47 +245,34 @@ export function IntelligenceStrip({ contextItem, onContextSelect, onContextClose
 
   useEffect(() => {
     if (!isDragging) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
+    const onMove = (e: MouseEvent) => {
       const deltaY = dragStartY.current - e.clientY;
-      if (Math.abs(deltaY) > 5) {
-        isMoved.current = true;
-      }
-
+      if (Math.abs(deltaY) > 5) isMoved.current = true;
       if (isMoved.current) {
         setCollapsed(false);
-        const newHeight = Math.max(200, Math.min(800, dragStartHeight.current + deltaY));
-        setHeight(newHeight);
+        setHeight(Math.max(200, Math.min(800, dragStartHeight.current + deltaY)));
       }
     };
-
-    const handleMouseUp = () => {
+    const onUp = () => {
       setIsDragging(false);
-      if (!isMoved.current) {
-        setCollapsed(v => !v);
-      }
+      if (!isMoved.current) setCollapsed((v) => !v);
     };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
     return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
     };
   }, [isDragging]);
 
-  // Auto-collapse when an item is selected
   useEffect(() => {
-    if (contextItem) {
-      setCollapsed(true);
-    }
+    if (contextItem) setCollapsed(true);
   }, [contextItem]);
 
   const TABS: { key: Tab; label: string; count?: number; icon: React.ReactNode }[] = [
-    { key: "leads", label: "Leads", count: leads.length, icon: <Zap style={{ width: 11, height: 11 }} /> },
-    { key: "hypotheses", label: "Hypotheses", count: MOCK_HYPOTHESES.length, icon: <Brain style={{ width: 11, height: 11 }} /> },
-    { key: "gaps", label: "Gaps", count: MOCK_GAPS.length, icon: <AlertCircle style={{ width: 11, height: 11 }} /> },
-    { key: "activity", label: "Recent Activity", count: MOCK_ACTIVITY.length, icon: <Clock style={{ width: 11, height: 11 }} /> },
+    { key: "leads", label: "Leads", count: data?.leads.length, icon: <Zap style={{ width: 11, height: 11 }} /> },
+    { key: "gaps", label: "Gaps", count: data?.gaps.length, icon: <AlertCircle style={{ width: 11, height: 11 }} /> },
+    { key: "activity", label: "Recent Activity", count: data?.activity.length, icon: <Clock style={{ width: 11, height: 11 }} /> },
   ];
 
   return (
@@ -439,12 +280,8 @@ export function IntelligenceStrip({ contextItem, onContextSelect, onContextClose
       className={`hub-strip ${collapsed ? "collapsed" : ""}`}
       aria-label="Intelligence strip"
       role="region"
-      style={{
-        height: collapsed ? undefined : height,
-        transition: isDragging ? "none" : "height 0.3s ease",
-      }}
+      style={{ height: collapsed ? undefined : height, transition: isDragging ? "none" : "height 0.3s ease" }}
     >
-      {/* Drag handle / collapse toggle */}
       <div
         className="strip-handle"
         onMouseDown={handleMouseDown}
@@ -456,10 +293,8 @@ export function IntelligenceStrip({ contextItem, onContextSelect, onContextClose
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
           <div className="strip-handle-bar" />
-          {collapsed
-            ? <ChevronUp style={{ width: 12, height: 12, color: "var(--color-text-subtle)" }} />
-            : <ChevronDown style={{ width: 12, height: 12, color: "var(--color-text-subtle)" }} />
-          }
+          {collapsed ? <ChevronUp style={{ width: 12, height: 12, color: "var(--color-text-subtle)" }} />
+                     : <ChevronDown style={{ width: 12, height: 12, color: "var(--color-text-subtle)" }} />}
           {!collapsed && (
             <span style={{ fontSize: "0.65rem", color: "var(--color-text-subtle)", letterSpacing: "0.1em", fontWeight: 600 }}>
               INTELLIGENCE STRIP
@@ -471,8 +306,7 @@ export function IntelligenceStrip({ contextItem, onContextSelect, onContextClose
 
       {!collapsed && (
         <div style={{ display: "flex", flexDirection: "column", height: "calc(100% - 20px)", overflow: "hidden" }}>
-          {/* Tab Bar */}
-          <div className="tab-bar">
+          <div className="tab-bar" style={{ display: "flex", alignItems: "center" }}>
             {TABS.map((t) => (
               <button
                 key={t.key}
@@ -486,29 +320,40 @@ export function IntelligenceStrip({ contextItem, onContextSelect, onContextClose
                   {t.icon}
                   {t.label}
                   {t.count !== undefined && (
-                    <span
-                      style={{
-                        display: "inline-flex", alignItems: "center", justifyContent: "center",
-                        width: 16, height: 16, borderRadius: "50%",
-                        background: activeTab === t.key ? "var(--color-accent)" : "var(--color-border-bright)",
-                        color: activeTab === t.key ? "white" : "var(--color-text-muted)",
-                        fontSize: "0.6rem", fontWeight: 700,
-                      }}
-                    >
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 16,
+                                   height: 16, padding: "0 3px", borderRadius: 8,
+                                   background: activeTab === t.key ? "var(--color-accent)" : "var(--color-border-bright)",
+                                   color: activeTab === t.key ? "white" : "var(--color-text-muted)",
+                                   fontSize: "0.6rem", fontWeight: 700 }}>
                       {t.count}
                     </span>
                   )}
                 </span>
               </button>
             ))}
+            <button
+              onClick={() => void load()}
+              aria-label="Refresh intelligence strip"
+              title={data ? `${data.stats.cases} case(s) · ${data.stats.evidence} evidence · ${data.stats.clues} clues` : "Refresh"}
+              style={{ marginLeft: "auto", marginRight: 10, background: "none", border: "none", cursor: "pointer",
+                       color: "var(--color-text-subtle)", display: "flex", alignItems: "center" }}
+            >
+              {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+            </button>
           </div>
 
-          {/* Tab Content */}
           <div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
-            {activeTab === "leads" && <LeadsTab leads={leads} onSelect={onContextSelect} />}
-            {activeTab === "hypotheses" && <HypothesesTab onSelect={onContextSelect} />}
-            {activeTab === "gaps" && <GapsTab />}
-            {activeTab === "activity" && <ActivityTab />}
+            {error && !data ? (
+              <Empty icon={<AlertCircle size={24} />} title="Could not load intelligence" hint={error} />
+            ) : !data ? (
+              <Empty icon={<Loader2 size={24} className="animate-spin" />} title="Loading…" hint="" />
+            ) : (
+              <>
+                {activeTab === "leads" && <LeadsTab leads={data.leads} onSelect={onContextSelect} />}
+                {activeTab === "gaps" && <GapsTab gaps={data.gaps} />}
+                {activeTab === "activity" && <ActivityTab activity={data.activity} />}
+              </>
+            )}
           </div>
         </div>
       )}
