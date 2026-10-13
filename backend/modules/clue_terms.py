@@ -66,6 +66,7 @@ _STOP_CAPS = {
     "Station", "Officer", "Sir", "Madam", "Mister", "Question", "Answer", "Interview", "Report",
     "Page", "Evidence", "Suspect", "Victim", "Date", "Time", "Place", "Name", "Address",
     "Phone", "Number", "Registration", "Vehicle", "Driver", "Yard", "Road", "Street",
+    "Tier", "Level", "Floor", "Room", "Sector", "Unit", "Zone", "Block", "Gate", "Section", "Visitor",
 }
 _TITLES = r"(?:Mr|Mrs|Ms|Miss|Dr|Shri|Smt|Sri|Thiru|Mister)\.?"
 _NAME_RE = re.compile(rf"\b(?:{_TITLES}\s+)?([A-Z][a-z]{{2,}}(?:\s+[A-Z][a-z]{{2,}}){{0,2}})\b")
@@ -128,6 +129,15 @@ def extract_terms(text: str) -> List[TextClue]:
             s = tokens[i - 1][1] if colour else tokens[i][1]
             found.setdefault(("OBJECT", norm), TextClue("OBJECT", value, norm, "item_word", s, tokens[i][2],
                                                         _context(text, s, tokens[i][2])))
+
+    # ── names written as initials + surname: "J. Vance", "J.VANCE" ──────────
+    for m in re.finditer(r"\b((?:[A-Z]\.\s?){1,2})([A-Z][A-Za-z]{2,})\b", text):
+        initials = re.sub(r"[^A-Za-z]", "", m.group(1)).lower()
+        surname = m.group(2).lower()
+        norm = f"{initials} {surname}"
+        s, e = m.span()
+        found.setdefault(("NAME", norm), TextClue("NAME", m.group(0), norm, "initials_surname", s, e,
+                                                  _context(text, s, e)))
 
     # ── names: capitalised sequences not explained by stop words ─────────────
     for m in _NAME_RE.finditer(text):

@@ -27,6 +27,7 @@ from backend.modules import audit_engine, auto_analysis
 from backend.modules.clue_terms import extract_all_terms, extract_terms
 from backend.modules.clue_text import extract_clues, normalize
 from backend.modules.correlation_engine import correlate
+from rapidfuzz.distance import Levenshtein
 from backend.modules.plate_postprocess import parse_plate
 from backend.modules.vision.cv_engine import format_timestamp
 from backend.modules.vision.objective_lexicon import enforce_objective_lexicon
@@ -244,10 +245,15 @@ async def _persist(ev: Dict[str, Any], result) -> Dict[str, int]:
                 counts["objects"] += 1
 
             voted = result.method == "tracking+voting"
+            if voted:
+                for c in _consolidated_ids(result.texts, [p.text for p in result.plates]):
+                    await _insert_clue(db, case_id, evidence_id, c["kind"], c["value"], c["norm"], c["conf"],
+                                       "AUTO_OCR", c["ts_ms"], c["bbox"], c["context"])
+                    counts["text_clues"] += 1
             for c in _text_clues_from_sightings(result.texts):
                 c["value"], c["norm"], c["context"] = _fix_plate(c["kind"], c["value"], c["norm"], c["context"])
-                if voted and c["kind"] == "PLATE":
-                    continue   # plates come from the consolidated, voted readings
+                if voted and c["kind"] in ("PLATE", "ID"):
+                    continue   # identifiers come from the consolidated, voted readings
                 await _insert_clue(db, case_id, evidence_id, c["kind"], c["value"], c["norm"],
                                    c["conf"], "AUTO_OCR",
                                    None if result.kind == "IMAGE" else c["ts_ms"], c["bbox"],
@@ -347,6 +353,37 @@ def _chunk_source(source_type: Optional[str]) -> str:
     return "DOCUMENT" if str(source_type or "").upper().startswith("PDF") else "TRANSCRIPT"
 
 
+_PLATE_NOTE = re.compile(r"licen[cs]e|number\s*plate|\bplate\b|registration", re.I)
+
+
+def _consolidated_ids(texts, known_plates=()) -> List[Dict[str, Any]]:
+    """
+    Scene OCR emits many near-duplicate identifier reads of one object
+    ("EF10DZT", "EFI0DZT", "EF1ODZT" ...). Cluster them and keep one voted
+    clue per cluster; unsupported single low-confidence reads are noise.
+    """
+    from backend.modules.plate_postprocess import cluster_reads, vote
+    sightings = []
+    for t in texts:
+        for c in extract_clues(t.text):
+            if c.kind in ("ID", "PLATE"):
+                sightings.append({"norm": c.norm, "conf": float(t.conf), "ts": t.ts_ms, "bbox": t.bbox_rel,
+                                  "context": c.context})
+    out = []
+    for cluster in cluster_reads([(x["norm"], x["conf"]) for x in sightings], threshold=78):
+        v = vote(cluster)
+        if v is None or (v.n_reads < 2 and max(c for _, c in cluster) < 0.7):
+            continue
+        if any(Levenshtein.distance(v.text, k) <= 1 for k in known_plates):
+            continue          # already reported by the video pipeline's own plate voting
+        members = [x for x in sightings if any(x["norm"] == t and abs(x["conf"] - c) < 1e-9 for t, c in cluster)]
+        best = max(members, key=lambda x: x["conf"])
+        out.append({"kind": "PLATE" if v.pattern != "RAW" else "ID", "value": v.text, "norm": v.text,
+                    "conf": v.confidence, "ts_ms": min(m["ts"] for m in members), "bbox": best["bbox"],
+                    "context": f"voted from {v.n_reads} read(s): " + ", ".join(t for t, _ in v.reads[:5])})
+    return out
+
+
 def chunk_terms(content: str):
     """Every clue (patterns + names + object phrases) found in one text chunk."""
     return extract_clues(content or "") + extract_all_terms(content or "")
@@ -435,7 +472,17 @@ def _clue_dicts(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
                 out.append({**base, "id": f"roi:{d['id']}:{c.kind}:{n}", "kind": c.kind, "value": v,
                             "norm_value": n, "context": ctx_note})
             alnum = re.sub(r"[^A-Z0-9]", "", readout.upper())
-            if not pattern and len(alnum) >= 4:
+            has_ident = any(c.kind in ("PLATE", "ID") for c in pattern)
+            looks_ident = (4 <= len(alnum) <= 12 and re.search(r"[A-Z]", alnum) and re.search(r"\d", alnum))
+            if looks_ident and not has_ident:
+                # e.g. a partly read plate "TX-88-2": no strict plate shape, but the model said it is on
+                # a licence plate (or the scan is of a vehicle) -> PLATE, otherwise a generic identifier.
+                notes = " ".join([label] + details)
+                kind = "PLATE" if (d.get("category") == "VEHICLE" or _PLATE_NOTE.search(notes)) else "ID"
+                v, n, ctx_note = _fix_plate(kind, readout, alnum, f"ROI readout: {readout}")
+                out.append({**base, "id": f"roi:{d['id']}:{kind}:{n}", "kind": kind, "value": v,
+                            "norm_value": n, "context": ctx_note})
+            elif not pattern and len(alnum) >= 4:
                 out.append({**base, "id": f"roi:{d['id']}:text:{alnum}", "kind": "TEXT",
                             "value": readout, "norm_value": alnum, "context": f"ROI readout: {readout}"})
 

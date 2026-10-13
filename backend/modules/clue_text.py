@@ -81,6 +81,20 @@ def _context(text: str, start: int, end: int, radius: int = 40) -> str:
 _SYMBOL_FIX = str.maketrans({"]": "J", "}": "J", "|": "I", "!": "I"})
 
 
+# "Plate: Tx-882-V", "registration no. KA01AB1234", "vehicle number ..." — the WORD before
+# an identifier tells us it is a plate even when its shape is unusual or partly read.
+_CUE_RE = re.compile(
+    r"(?:number\s*plate|licen[cs]e\s*plate|registration(?:\s*(?:no|number))?|reg\.?\s*no|"
+    r"plate(?:\s*(?:no|number))?|vehicle\s*(?:no|number)|\breg\b)\.?\s*[:#\-\u2013]?\s*"
+    r"([A-Za-z0-9][A-Za-z0-9 \-]{2,24})", re.I)
+_CUE_WORDS = re.compile(r"plate|registration|\breg\b|licen[cs]e|vehicle|number", re.I)
+_CUE_FILLER = {"was", "is", "are", "no", "number", "the", "a", "an", "of", "on", "at", "it", "its",
+               "reads", "read", "said", "as", "to", "for", "plate", "reg", "registration"}
+# Two-letter English words that are not plate prefixes ("to 1400", "at 0930").
+_NOT_PLATE_PREFIX = {"TO", "AT", "IN", "ON", "NO", "OF", "BY", "IS", "IT", "AS", "OR", "IF", "SO", "DO",
+                     "GO", "BE", "WE", "HE", "ME", "MY", "AN", "AM", "PM", "NR", "ID", "RE", "VS"}
+
+
 def extract_clues(text: str) -> List[TextClue]:
     """Extract all clues from `text` (deduplicated by kind + normalised value)."""
     if not text or not text.strip():
@@ -95,6 +109,27 @@ def extract_clues(text: str) -> List[TextClue]:
     def overlaps(a: int, b: int) -> bool:
         return any(a < e and b > s for s, e in claimed)
 
+    # Cue-driven plates first: they win over generic shape matching.
+    for m in _CUE_RE.finditer(text):
+        tokens = list(re.finditer(r"[A-Za-z0-9]+", m.group(1)))
+        while tokens and tokens[0].group(0).lower() in _CUE_FILLER:       # "plate WAS TN09..."
+            tokens.pop(0)
+        kept = []
+        for tk in tokens:
+            w = tk.group(0)
+            if w.isalpha() and (len(w) > 3 or (len(w) == 3 and w.islower())):   # an ordinary word ends the plate
+                break
+            kept.append(tk)
+        if not kept:
+            continue
+        s = m.start(1) + kept[0].start()
+        e = m.start(1) + kept[-1].end()
+        raw = text[s:e]
+        norm = normalize("PLATE", raw)
+        if re.search(r"[A-Z]", norm) and re.search(r"\d", norm) and 4 <= len(norm) <= 11 and not overlaps(s, e):
+            claimed.append((s, e))
+            found.setdefault(("PLATE", norm), TextClue("PLATE", raw, norm, "plate_cue", s, e, _context(text, s, e)))
+
     for kind, name, pattern in _PATTERNS:
         # Plates are matched on upper-cased text (OCR case is unreliable);
         # e-mails keep original case.
@@ -105,6 +140,17 @@ def extract_clues(text: str) -> List[TextClue]:
                 continue
             raw = text[s:e].strip()
             norm = normalize(kind, raw)
+            if name == "plate_generic":
+                # A bare "AB 1234" is ambiguous: it is a PLATE only with a cue nearby,
+                # otherwise it is just an identifier (case ref, camera name ...).
+                if re.sub(r"[^A-Z]", "", norm)[:2] in _NOT_PLATE_PREFIX:
+                    continue
+                if not _CUE_WORDS.search(text[max(0, s - 45):s]):
+                    kind_here = "ID"
+                    claimed.append((s, e))
+                    if len(norm) >= 5:
+                        found.setdefault(("ID", norm), TextClue("ID", raw, norm, "alnum_id", s, e, _context(text, s, e)))
+                    continue
             if kind == "PHONE" and not (10 <= len(norm) <= 13):
                 continue
             if kind == "PLATE":

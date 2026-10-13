@@ -185,12 +185,15 @@ def cluster_reads(reads: Sequence[Tuple[str, float]], threshold: int = 78) -> Li
     """Group plate reads that plausibly come from the same plate (string similarity)."""
     from rapidfuzz import fuzz
 
+    # Compare after folding OCR confusions, so EF10DZT / EFI0DZT / EF1ODZT are one plate.
+    fold = str.maketrans({"O": "0", "Q": "0", "D": "0", "I": "1", "L": "1", "B": "8", "S": "5",
+                          "Z": "2", "G": "6"})
     clusters: List[List[Tuple[str, float]]] = []
     for text, conf in reads:
-        key = re.sub(r"[^A-Z0-9]", "", text.upper())
+        key = re.sub(r"[^A-Z0-9]", "", text.upper()).translate(fold)
         placed = False
         for cl in clusters:
-            ref = re.sub(r"[^A-Z0-9]", "", cl[0][0].upper())
+            ref = re.sub(r"[^A-Z0-9]", "", cl[0][0].upper()).translate(fold)
             if abs(len(ref) - len(key)) <= 1 and fuzz.ratio(ref, key) >= threshold:
                 cl.append((text, conf))
                 placed = True
