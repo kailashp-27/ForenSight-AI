@@ -365,11 +365,13 @@ async def load_case_context(case_id: str) -> Dict[str, Any]:
                FROM text_chunks t JOIN evidence e ON e.id=t.evidence_id
                WHERE e.case_id=%s ORDER BY t.evidence_id, t.chunk_index""", (case_id,))
         chunks = [dict(r) for r in await cur.fetchall()]
+        cur = await db.execute("SELECT * FROM person_designations WHERE case_id=%s", (case_id,))
+        designations = [dict(r) for r in await cur.fetchall()]
         await db.commit()
     finally:
         await db.close()
     return {"case": dict(case), "evidence": evidence, "clues": clues,
-            "detections": detections, "chunks": chunks}
+            "detections": detections, "chunks": chunks, "designations": designations}
 
 
 def _chunk_source(source_type: Optional[str]) -> str:
@@ -463,6 +465,7 @@ def _clue_dicts(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
                  "confidence": 0.9 if source in ("DOCUMENT", "CHAT") else 0.6, "source": source,
                  "timestamp_ms": ts, "context": where + context, "bbox": None,
                  "verified": False, "chunk_id": ch["id"], "_n": 1,
+                 "speaker": ch.get("speaker"), "pos": getattr(c, "start", None),
                  "weight": float(getattr(c, "weight", 1.0))}
             seen[key] = d
             out.append(d)
@@ -547,6 +550,9 @@ def _clue_dicts(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
         # Names / object phrases in the model's notes. The label is already an
         # OBJECT clue above, so from the label only NAMES are taken (no duplicate).
         terms = [c for c in extract_terms(label) if c.kind == "NAME"]
+        if readout and readout.upper() != "NONE":
+            # a badge / name tag / door sign: "J.VANCE Tier 2" names a person
+            terms += [c for c in extract_terms(readout) if c.kind == "NAME"]
         terms += extract_all_terms(" . ".join(details))
         seen_terms = set()
         for c in terms:
@@ -565,12 +571,28 @@ def _clue_dicts(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
             if not (c["kind"] == "OBJECT" and "person" in (c["norm_value"] or "").split())]
 
 
+def _apply_aliases(clues: List[Dict[str, Any]], designations: List[Dict[str, Any]]) -> None:
+    """Names the investigator declared to be the same person share one canonical name."""
+    from backend.modules.people_roster import norm_name, _json_list
+    mapping: Dict[str, str] = {}
+    for d in designations:
+        canon = norm_name(d["display_name"])
+        for a in [d["display_name"]] + _json_list(d.get("aliases")):
+            mapping[norm_name(a)] = canon
+    if not mapping:
+        return
+    for c in clues:
+        if c["kind"] == "NAME" and c["norm_value"] in mapping:
+            c["norm_value"] = mapping[c["norm_value"]]
+
+
 async def case_correlations(case_id: str) -> Dict[str, Any]:
     ctx = await load_case_context(case_id)
     if not ctx:
         return {}
     evidence = {e["id"]: e for e in ctx["evidence"]}
     clues = _clue_dicts(ctx)
+    _apply_aliases(clues, ctx.get("designations", []))
     matches = correlate(clues, evidence)
     return {"ctx": ctx, "clues": clues, "matches": matches, "evidence": evidence}
 

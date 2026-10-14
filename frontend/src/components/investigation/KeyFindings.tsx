@@ -11,7 +11,8 @@ import type { KeyFindingsData, KFSupport, KFPhoto, MatchStrength } from "../../s
 
 const STRENGTH_COLOR: Record<string, string> = { STRONG: "#10b981", MEDIUM: "#f59e0b", WEAK: "#94a3b8" };
 const ROLE_COLOR: Record<string, string> = {
-  SUSPECT: "#ef4444", VICTIM: "#3b82f6", WITNESS: "#10b981", STOLEN: "#f59e0b", WEAPON: "#ef4444",
+  SUSPECT: "#f59e0b", VICTIM: "#3b82f6", WITNESS: "#10b981", STOLEN: "#f59e0b", WEAPON: "#ef4444",
+  PERSON_OF_INTEREST: "#a855f7", CLEARED: "#64748b", GUILTY: "#ef4444",
   TOOL: "#f59e0b", ITEM: "#8b5cf6",
 };
 const CLASS_LABEL: Record<string, string> = {
@@ -153,9 +154,10 @@ export function KeyFindings({ data, onOpen }: Props) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                   <strong style={{ fontSize: "0.92rem", color: "var(--color-text-primary)" }}>{p.name}</strong>
-                  {p.role && <Badge text={p.role} color={ROLE_COLOR[p.role] ?? "#94a3b8"} />}
+                  {p.role && <Badge text={p.role === "GUILTY" ? "GUILTY (investigator)" : p.role.replace(/_/g, " ")}
+                                    color={ROLE_COLOR[p.role] ?? "#94a3b8"} />}
                   {p.verified && <BadgeCheck size={14} style={{ color: "#10b981" }} aria-label="investigator verified" />}
-                  <Review show={!!p.role && p.role_source !== "investigator"} />
+                  <Review show={!!p.role && !(p.role_source ?? "").startsWith("investigator")} />
                 </div>
                 {p.aliases.length > 0 && (
                   <div style={{ fontSize: "0.68rem", color: "var(--color-text-muted)" }}>also written: {p.aliases.join(", ")}</div>

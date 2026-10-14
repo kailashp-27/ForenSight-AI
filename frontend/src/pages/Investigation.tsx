@@ -5,17 +5,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  ArrowLeft, Clock, Download, Fingerprint, FileText, GraduationCap, Link2, ListChecks, Loader2, MapPin, MessageSquareText, Network, Play,
+  ArrowLeft, Clock, Users, Download, Fingerprint, FileText, GraduationCap, Link2, ListChecks, Loader2, MapPin, MessageSquareText, Network, Play,
   Printer, Sparkles,
 } from "lucide-react";
 import { casesApi, type Case } from "../services/api";
 import {
-  investigationApi, caseViewsApi, caseBoardApi, type EventTimelineData, type KeyFindingsData, type AnalysisStatus, type CaseClue, type CaseGraph, type CaseMapData,
+  investigationApi, caseViewsApi, caseBoardApi, peopleApi, type PeopleResponse, type EventTimelineData, type KeyFindingsData, type AnalysisStatus, type CaseClue, type CaseGraph, type CaseMapData,
   type CaseTranscripts, type ClueMatch, type Correlations,
 } from "../services/forensicApi";
 import { ClueMatches } from "../components/investigation/ClueMatches";
 import { ClueList } from "../components/investigation/ClueList";
 import { KeyFindings } from "../components/investigation/KeyFindings";
+import { PeopleRoster } from "../components/investigation/PeopleRoster";
 import { EventTimeline } from "../components/investigation/EventTimeline";
 import { TranscriptsPanel } from "../components/investigation/TranscriptsPanel";
 import { ReviewQueue } from "../components/investigation/ReviewQueue";
@@ -23,7 +24,7 @@ import { CaseMap } from "../components/investigation/CaseMap";
 import { EntityGraph } from "../components/cctv/EntityGraph";
 import { AiDisclaimerBanner } from "../components/ai/AiDisclaimerBanner";
 
-type Tab = "key" | "timeline" | "matches" | "clues" | "transcripts" | "review" | "map" | "graph" | "report";
+type Tab = "key" | "people" | "timeline" | "matches" | "clues" | "transcripts" | "review" | "map" | "graph" | "report";
 
 const STATUS_COLOR: Record<string, string> = {
   COMPLETED: "#10b981", PARTIAL: "#f59e0b", RUNNING: "#3b82f6", FAILED: "#ef4444", NOT_RUN: "#64748b",
@@ -41,6 +42,7 @@ export function Investigation() {
   const [clues, setClues] = useState<CaseClue[] | null>(null);
   const [keyFindings, setKeyFindings] = useState<KeyFindingsData | null>(null);
   const [events, setEvents] = useState<EventTimelineData | null>(null);
+  const [peopleData, setPeopleData] = useState<PeopleResponse | null>(null);
   const [transcripts, setTranscripts] = useState<CaseTranscripts | null>(null);
   const [tab, setTab] = useState<Tab>("key");
   const [highlight, setHighlight] = useState<ClueMatch | null>(null);
@@ -51,7 +53,7 @@ export function Investigation() {
   const loadViews = useCallback(async () => {
     if (!caseId) return;
     try {
-      const [c, m, g, cl, tr, kf, ev] = await Promise.all([
+      const [c, m, g, cl, tr, kf, ev, pp] = await Promise.all([
         investigationApi.correlations(caseId),
         investigationApi.map(caseId),
         investigationApi.clueGraph(caseId),
@@ -59,7 +61,9 @@ export function Investigation() {
         caseViewsApi.transcripts(caseId),
         caseBoardApi.keyFindings(caseId),
         caseBoardApi.eventTimeline(caseId),
+        peopleApi.list(caseId),
       ]);
+      setPeopleData(pp);
       setKeyFindings(kf);
       setEvents(ev);
       setCorr(c);
@@ -254,6 +258,7 @@ export function Investigation() {
       <div style={{ padding: "0.75rem 1.25rem", display: "flex", gap: 4 }} role="tablist">
         {tabBtn("key", "Key findings", <Fingerprint size={14} />,
                 (keyFindings?.people.length ?? 0) + (keyFindings?.items.length ?? 0) + (keyFindings?.vehicles.length ?? 0))}
+        {tabBtn("people", "People", <Users size={14} />, peopleData?.totals.unassigned)}
         {tabBtn("timeline", "Event timeline", <Clock size={14} />, events?.groups.length)}
         {tabBtn("matches", "Matching clues", <Link2 size={14} />, (totals?.strong ?? 0) + (totals?.medium ?? 0))}
         {tabBtn("clues", "All clues", <ListChecks size={14} />, totals?.clues)}
@@ -277,6 +282,16 @@ export function Investigation() {
         {tab === "key" && (
           <KeyFindings
             data={keyFindings}
+            onOpen={(eid, ms) => openMember(eid, typeOf(eid), ms)}
+          />
+        )}
+
+        {tab === "people" && caseId && (
+          <PeopleRoster
+            people={peopleData?.people ?? null}
+            caseId={caseId}
+            operatorId={localStorage.getItem("forensight.operatorId") || "OPERATOR-1"}
+            onChanged={() => void loadViews()}
             onOpen={(eid, ms) => openMember(eid, typeOf(eid), ms)}
           />
         )}

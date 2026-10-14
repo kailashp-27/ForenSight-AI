@@ -136,6 +136,39 @@ def build_report_html(d: Dict[str, Any]) -> str:
             o.append(f"<tr><td>{_t(m['value'])}</td><td>{_E(files)}</td><td>{_pct(m['score'])}</td></tr>")
         o.append("</table>")
 
+    # people involved + the investigator's designations
+    people = d.get("people") or []
+    if people:
+        o.append("<h2>People involved</h2>")
+        o.append("<p class='muted'>Everyone named, badged or carded in the evidence. A role below is the "
+                 "<strong>investigator's own designation</strong> (who, when, and on what basis). ForenSight does not "
+                 "determine guilt; a suggestion is only a nearby word in the evidence and is shown as such.</p>")
+        o.append("<table><tr><th>Person</th><th>Identifiers</th><th>Role</th><th>Designated by / basis</th>"
+                 "<th>Seen in</th></tr>")
+        label = {"GUILTY": "Guilty (investigator's determination)", "SUSPECT": "Suspect", "VICTIM": "Victim",
+                 "WITNESS": "Witness", "PERSON_OF_INTEREST": "Person of interest", "CLEARED": "Cleared"}
+        for p in people:
+            ids = ", ".join(i["value"] for i in p.get("identifiers", [])) or "-"
+            role = p.get("role")
+            if role:
+                role_txt = label.get(role, role)
+                des = p.get("designation") or {}
+                by = (f"{des.get('by') or p.get('role_source') or ''} {des.get('at') or ''}".strip()
+                      + (f" - basis: {des['basis']}" if des.get("basis") else ""))
+            else:
+                role_txt = "not assigned" + (
+                    f" (suggested: {p['suggested_role'].title()} - {p.get('suggested_reason')})"
+                    if p.get("suggested_role") else "")
+                by = "-"
+            seen = ", ".join(sorted({s["file_name"] for s in p.get("support", [])})) or "-"
+            cls = "bad" if role == "GUILTY" else ""
+            o.append(f"<tr><td><strong>{_E(str(p['name']))}</strong></td><td class='mono'>{_E(ids)}</td>"
+                     f"<td class='{cls}'>{_E(role_txt)}</td><td>{_E(by)}</td><td>{_E(seen)}</td></tr>")
+        o.append("</table>")
+        if any(p.get("role") == "GUILTY" for p in people):
+            o.append("<div class='banner'>A 'guilty' designation is a determination recorded by the named "
+                     "investigator. It is not a finding of this system and is not a legal verdict.</div>")
+
     # 4. verified findings
     o.append("<h2>4. Investigator-verified findings</h2>")
     if not verified:

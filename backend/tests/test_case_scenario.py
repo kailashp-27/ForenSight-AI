@@ -107,7 +107,7 @@ def test_key_findings_people_ids_items_vehicle(case):
     kf = build_key_findings(case["ctx"], case["pool"], case["matches"])
 
     vance = next(p for p in kf["people"] if "vance" in p["name"].lower())
-    assert vance["role"] == "SUSPECT" and vance["role_source"] == "investigator" and vance["verified"]
+    assert vance["role"] == "SUSPECT" and vance["role_source"].startswith("investigator") and vance["verified"]
     assert vance["photos"] and vance["photos"][0]["url"].endswith("/findings/r1/crop")
 
     assert any("4471" in i["value"] for i in kf["ids"])

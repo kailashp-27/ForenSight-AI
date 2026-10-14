@@ -185,6 +185,26 @@ async def _ensure_columns(cur) -> None:
             await cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
+# The investigator's own decisions about who is who in a case. Kept apart from evidence-derived
+# data: a role here is always a human designation, attributed and timestamped.
+DESIGNATIONS_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS person_designations (
+        id            VARCHAR(64)  PRIMARY KEY,
+        case_id       VARCHAR(255) NOT NULL,
+        person_key    VARCHAR(190) NOT NULL,
+        display_name  VARCHAR(190) NOT NULL,
+        role          VARCHAR(30)  NOT NULL DEFAULT 'UNASSIGNED',
+        basis         TEXT NULL,
+        aliases       TEXT NULL,
+        is_manual     TINYINT(1)   NOT NULL DEFAULT 0,
+        designated_by VARCHAR(100) NULL,
+        designated_at VARCHAR(40)  NULL,
+        created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_case_person (case_id, person_key)
+    );
+"""
+
+
 async def init_db() -> None:
     """Create DB tables on startup using aiomysql."""
     global _pool
@@ -199,6 +219,7 @@ async def init_db() -> None:
             # ROI-inspection feature (CREATE TABLE IF NOT EXISTS won't add columns).
             await _ensure_columns(cur)
             await cur.execute(CLUES_TABLE_SQL)
+            await cur.execute(DESIGNATIONS_TABLE_SQL)
             # Hash-chained, append-only chain-of-custody log.
             from backend.modules import audit_engine
             await audit_engine.ensure_schema(cur)

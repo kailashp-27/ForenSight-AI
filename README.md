@@ -220,3 +220,23 @@ A video's real start time is read from its burned-in overlay (needs >= 2 consist
 events with no time are attached only through such a shared term and marked as linked by content. Times without a date are
 placed on the case's most common date and flagged as assumed.
 
+---
+
+## People involved: the investigator chooses who is who
+
+The **People** tab lists everyone named, badged or carded in the evidence: names in speech, documents and chat, chat
+authors, and badge / ID-card / visitor-pass readings (an ID with no name beside it appears as "Holder of ..."). For each
+person you can choose **Victim, Suspect, Person of interest, Witness, Cleared** or **Guilty**, merge two entries ("same
+person as..."), attach a badge/ID to a person, or add someone by hand.
+
+- Roles are the **investigator's designations**: saved with your operator ID and time, written to the tamper-evident
+  custody log, and shown in the report with who set them.
+- The system only *suggests* victim / suspect / witness from a nearby word (shown as a suggestion with its reason).
+  It never suggests or sets guilt.
+- **Guilty** is deliberately hard to set: explicit confirmation plus a written basis (>= 20 characters). The report
+  labels it "Guilty (investigator's determination)" and states it is not a finding of the system or a legal verdict.
+- Names you merge or IDs you attach are remembered as aliases, so later matching across evidence uses them.
+
+API: `GET /api/v1/cases/{id}/people`, `PUT|DELETE /api/v1/cases/{id}/people/{key}`, `POST .../people`,
+`POST .../people/{key}/aliases`.
+

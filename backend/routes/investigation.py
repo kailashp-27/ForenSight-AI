@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -230,7 +232,10 @@ async def report(case_id: str, download: bool = Query(False), request: Request =
                          "timestamp_str": d.get("timestamp_str"), "confidence": d["confidence"]})
 
     chain = await audit_engine.verify_chain()
+    from backend.modules.people_roster import build_roster
+    people = build_roster(ctx, data["clues"], data["matches"], ctx.get("designations", []))
     html_doc = build_report_html({
+        "people": people,
         "case": ctx["case"], "evidence": ctx["evidence"], "matches": data["matches"],
         "findings": findings, "auto_detections": auto,
         "chain": {"ok": chain.ok, "entries_checked": chain.entries_checked,
@@ -631,3 +636,183 @@ async def set_recording_start(evidence_id: str, body: RecordingStartBody) -> Dic
         "RECORDING_START_SET", operator_id=body.operator_id, case_id=row["case_id"], evidence_id=evidence_id,
         file_hash_sha256=row.get("file_hash_sha256"), metadata={"recording_start": body.recording_start})
     return {"evidence_id": evidence_id, "recording_start": body.recording_start, "source": "manual"}
+
+
+# ── people involved: the investigator chooses victim / suspects / guilty ──────
+
+_PERSON_ROLES = ("UNASSIGNED", "VICTIM", "SUSPECT", "PERSON_OF_INTEREST", "WITNESS", "CLEARED", "GUILTY")
+
+
+class PersonDesignationBody(BaseModel):
+    """
+    The investigator's decision about one person.
+
+    GUILTY is deliberately hard to set: it must be confirmed explicitly and
+    carry a written basis. It records the investigator's own determination,
+    attributed to them and audited — ForenSight never suggests or infers it.
+    """
+    role: str = Field(default="UNASSIGNED")
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=190)
+    basis: Optional[str] = Field(default=None, max_length=4000)
+    aliases: List[str] = Field(default_factory=list, max_length=60)   # other names / ID values of this person
+    operator_id: str = Field(min_length=1, max_length=100)
+    confirm_determination: bool = False
+
+    def check(self) -> None:
+        if self.role not in _PERSON_ROLES:
+            raise HTTPException(status_code=422, detail=f"role must be one of {', '.join(_PERSON_ROLES)}")
+        if self.role == "GUILTY":
+            if not self.confirm_determination:
+                raise HTTPException(status_code=422, detail=(
+                    "Designating a person as guilty is YOUR determination, not a finding of this system. "
+                    "Set confirm_determination=true to record it."))
+            if not self.basis or len(self.basis.strip()) < 20:
+                raise HTTPException(status_code=422, detail=(
+                    "A written basis (at least 20 characters) is required for a guilty designation."))
+
+
+class NewPersonBody(BaseModel):
+    name: str = Field(min_length=2, max_length=190)
+    identifiers: List[str] = Field(default_factory=list, max_length=20)
+    operator_id: str = Field(min_length=1, max_length=100)
+
+
+def _person_key_for(name: str) -> str:
+    from backend.modules.people_roster import norm_name
+    return "p:" + re.sub(r"\s+", "-", norm_name(name))
+
+
+async def _roster_for(case_id: str) -> List[Dict[str, Any]]:
+    from backend.modules.people_roster import build_roster
+    data = await _require_case(case_id)
+    return build_roster(data["ctx"], data["clues"], data["matches"], data["ctx"].get("designations", []))
+
+
+@router.get("/cases/{case_id}/people")
+async def case_people(case_id: str) -> Dict[str, Any]:
+    """Everyone involved, found from names, chat authors, badges and ID cards in the evidence."""
+    roster = await _roster_for(case_id)
+    return {
+        "people": roster,
+        "roles": list(_PERSON_ROLES),
+        "totals": {
+            "people": len(roster),
+            "designated": sum(1 for p in roster if p["role"]),
+            "unassigned": sum(1 for p in roster if not p["role"]),
+            "with_badge_or_id": sum(1 for p in roster if p["identifiers"]),
+        },
+        "notice": ("Roles you assign are the investigator's own designations and are recorded with your ID and "
+                   "time. The system only suggests victim / suspect / witness from nearby words; it never "
+                   "suggests or decides guilt."),
+    }
+
+
+async def _upsert_designation(case_id: str, key: str, body: PersonDesignationBody, manual: bool = False) -> Dict[str, Any]:
+    from backend.modules.people_roster import _json_list, norm_name
+    body.check()
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT id FROM cases WHERE id=%s", (case_id,))
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Case not found")
+        cur = await db.execute("SELECT * FROM person_designations WHERE case_id=%s AND person_key=%s", (case_id, key))
+        old = await cur.fetchone()
+        aliases = sorted({a.strip() for a in (list(_json_list(old["aliases"])) if old else []) + body.aliases if a.strip()})
+        name = body.display_name or (old["display_name"] if old else None) or key.split(":", 1)[-1].replace("-", " ").title()
+        if old:
+            await db.execute(
+                """UPDATE person_designations
+                   SET display_name=%s, role=%s, basis=%s, aliases=%s, designated_by=%s, designated_at=%s
+                   WHERE id=%s""",
+                (name, body.role, body.basis, json.dumps(aliases), body.operator_id, now, old["id"]))
+        else:
+            await db.execute(
+                """INSERT INTO person_designations
+                   (id, case_id, person_key, display_name, role, basis, aliases, is_manual, designated_by, designated_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (uuid.uuid4().hex, case_id, key, name, body.role, body.basis, json.dumps(aliases),
+                 1 if manual else 0, body.operator_id, now))
+        await db.commit()
+    finally:
+        await db.close()
+
+    await audit_engine.append_entry(
+        "PERSON_DESIGNATED", operator_id=body.operator_id, case_id=case_id,
+        metadata={"person_key": key, "display_name": name, "role": body.role,
+                  "previous_role": old["role"] if old else None, "basis": body.basis, "aliases": aliases,
+                  "determination_by_investigator": body.role == "GUILTY"})
+    return {"person_key": key, "display_name": name, "role": body.role, "designated_by": body.operator_id,
+            "designated_at": now, "aliases": aliases}
+
+
+@router.put("/cases/{case_id}/people/{person_key:path}")
+async def designate_person(case_id: str, person_key: str, body: PersonDesignationBody) -> Dict[str, Any]:
+    return await _upsert_designation(case_id, person_key, body)
+
+
+@router.post("/cases/{case_id}/people", status_code=201)
+async def add_person(case_id: str, body: NewPersonBody) -> Dict[str, Any]:
+    """Add someone who is not (yet) named in any evidence, optionally with badge / ID values."""
+    key = _person_key_for(body.name)
+    designation = PersonDesignationBody(role="UNASSIGNED", display_name=body.name.strip(), aliases=body.identifiers,
+                                        operator_id=body.operator_id)
+    return await _upsert_designation(case_id, key, designation, manual=True)
+
+
+@router.delete("/cases/{case_id}/people/{person_key:path}")
+async def clear_person(case_id: str, person_key: str, operator_id: str = Query("OPERATOR", min_length=1)) -> Dict[str, Any]:
+    """Remove the investigator's designation (manual people disappear; found people go back to unassigned)."""
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT * FROM person_designations WHERE case_id=%s AND person_key=%s",
+                               (case_id, person_key))
+        row = await cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="No designation for this person")
+        await db.execute("DELETE FROM person_designations WHERE id=%s", (row["id"],))
+        await db.commit()
+    finally:
+        await db.close()
+    await audit_engine.append_entry(
+        "PERSON_DESIGNATION_CLEARED", operator_id=operator_id, case_id=case_id,
+        metadata={"person_key": person_key, "previous_role": row["role"], "display_name": row["display_name"]})
+    return {"person_key": person_key, "cleared": True}
+
+
+class AliasBody(BaseModel):
+    aliases: List[str] = Field(min_length=1, max_length=40)       # other names / badge / ID values of this person
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=190)
+    operator_id: str = Field(min_length=1, max_length=100)
+
+
+@router.post("/cases/{case_id}/people/{person_key:path}/aliases")
+async def add_person_aliases(case_id: str, person_key: str, body: AliasBody) -> Dict[str, Any]:
+    """
+    Declare that more names / badge or ID values belong to this person ("same person as...",
+    "this ID card is theirs"). Does not change their role.
+    """
+    from backend.modules.people_roster import _json_list
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT * FROM person_designations WHERE case_id=%s AND person_key=%s",
+                               (case_id, person_key))
+        row = await cur.fetchone()
+        merged = sorted({a.strip() for a in (_json_list(row["aliases"]) if row else []) + body.aliases if a.strip()})
+        if row:
+            await db.execute("UPDATE person_designations SET aliases=%s WHERE id=%s", (json.dumps(merged), row["id"]))
+        else:
+            name = body.display_name or person_key.split(":", 1)[-1].replace("-", " ").title()
+            await db.execute(
+                """INSERT INTO person_designations
+                   (id, case_id, person_key, display_name, role, aliases, is_manual, designated_by, designated_at)
+                   VALUES (%s,%s,%s,%s,'UNASSIGNED',%s,0,%s,%s)""",
+                (uuid.uuid4().hex, case_id, person_key, name, json.dumps(merged), body.operator_id, now))
+        await db.commit()
+    finally:
+        await db.close()
+    await audit_engine.append_entry(
+        "PERSON_ALIASES_ADDED", operator_id=body.operator_id, case_id=case_id,
+        metadata={"person_key": person_key, "added": body.aliases})
+    return {"person_key": person_key, "aliases": merged}

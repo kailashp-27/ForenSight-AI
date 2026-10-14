@@ -538,3 +538,70 @@ export const caseBoardApi = {
       body: JSON.stringify({ recording_start: value }),
     }),
 };
+
+// ── People involved: the investigator chooses victim / suspects / guilty ──────
+
+export type PersonRole =
+  | "UNASSIGNED" | "VICTIM" | "SUSPECT" | "PERSON_OF_INTEREST" | "WITNESS" | "CLEARED" | "GUILTY";
+
+export interface RosterPerson {
+  id: string;
+  key: string;
+  name: string;
+  aliases: string[];
+  alias_norms: string[];
+  role: PersonRole | null;
+  role_source: string | null;
+  suggested_role: "VICTIM" | "SUSPECT" | "WITNESS" | null;
+  suggested_reason: string | null;
+  needs_review: boolean;
+  verified: boolean;
+  identifiers: { value: string; norm: string; how: string; file_name: string; at: string | null; source: string | null }[];
+  photos: KFPhoto[];
+  support: KFSupport[];
+  evidence_count: number;
+  found_via: string[];
+  strength: MatchStrength | null;
+  manual: boolean;
+  unidentified?: boolean;
+  designation: { basis: string | null; by: string | null; at: string | null } | null;
+  has_designation_row: boolean;
+}
+
+export interface PeopleResponse {
+  people: RosterPerson[];
+  roles: PersonRole[];
+  totals: { people: number; designated: number; unassigned: number; with_badge_or_id: number };
+  notice: string;
+}
+
+export const peopleApi = {
+  list: (caseId: string) => request<PeopleResponse>(`/cases/${caseId}/people`),
+  designate: (
+    caseId: string,
+    key: string,
+    body: {
+      role: PersonRole; operator_id: string; display_name?: string; basis?: string;
+      aliases?: string[]; confirm_determination?: boolean;
+    }
+  ) =>
+    request<unknown>(`/cases/${caseId}/people/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  add: (caseId: string, body: { name: string; identifiers: string[]; operator_id: string }) =>
+    request<unknown>(`/cases/${caseId}/people`, { method: "POST", body: JSON.stringify(body) }),
+  addAliases: (
+    caseId: string,
+    key: string,
+    body: { aliases: string[]; display_name?: string; operator_id: string }
+  ) =>
+    request<unknown>(`/cases/${caseId}/people/${encodeURIComponent(key)}/aliases`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  clear: (caseId: string, key: string, operatorId: string) =>
+    request<unknown>(`/cases/${caseId}/people/${encodeURIComponent(key)}?operator_id=${encodeURIComponent(operatorId)}`, {
+      method: "DELETE",
+    }),
+};

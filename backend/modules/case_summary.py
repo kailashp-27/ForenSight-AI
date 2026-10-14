@@ -150,68 +150,9 @@ def build_key_findings(ctx: Dict[str, Any], pool: List[Dict[str, Any]], matches:
         for mem in m["members"]:
             by_clue[mem["clue_id"]].append(m)
 
-    # ── people ───────────────────────────────────────────────────────────────
-    name_clues = [c for c in pool if c["kind"] == "NAME"]
-    groups: List[Dict[str, Any]] = []
-    for c in sorted(name_clues, key=lambda c: -len(c["norm_value"])):
-        toks = _name_tokens(c["norm_value"])
-        for g in groups:
-            gt = g["tokens"]
-            if toks and (toks <= gt or gt <= toks or fuzz.token_set_ratio(c["norm_value"], g["norm"]) >= 95):
-                g["clues"].append(c)
-                g["tokens"] |= toks
-                break
-        else:
-            groups.append({"norm": c["norm_value"], "tokens": set(toks), "clues": [c]})
-
-    people: List[Dict[str, Any]] = []
-    used_photos: set = set()
-    for g in groups:
-        cl = g["clues"]
-        aliases = sorted({c["value"] for c in cl}, key=len, reverse=True)
-        inv_roles = [c.get("role") for c in cl if c.get("role") in PERSON_ROLES]
-        role = Counter(inv_roles).most_common(1)[0][0] if inv_roles else None
-        role_source = "investigator" if role else None
-        if not role:
-            role = _role_from_text([c.get("context") or "" for c in cl])
-            role_source = "text cue" if role else None
-
-        photos = []
-        for d in roi:
-            blob = " ".join([d.get("subject_name") or "", d.get("label") or "", d.get("readout_text") or ""]
-                            + _details(d))
-            toks_d = {t for n in [d.get("subject_name") or ""] + [c.value for c in extract_terms(blob) if c.kind == "NAME"]
-                      for t in _name_tokens(n)}
-            if toks_d & g["tokens"] and (g["tokens"] & toks_d):
-                photos.append(_photo(d, names, f"{d.get('label')} — {d.get('timestamp_str') or ''}".strip(" —")))
-                used_photos.add(d["id"])
-        people.append({
-            "id": f"p:{g['norm']}", "name": aliases[0], "aliases": aliases[1:6],
-            "role": role, "role_source": role_source, "needs_review": role_source != "investigator",
-            "verified": any(c.get("verified") for c in cl),
-            "evidence_count": len({c["evidence_id"] for c in cl}),
-            "strength": _best_strength({c["id"] for c in cl}, by_clue),
-            "photos": photos, "support": _dedupe_support([_support(c, names) for c in cl]),
-        })
-
-    # photo-only persons: a person scan an investigator labelled but nobody named
-    for d in roi:
-        if d["id"] in used_photos:
-            continue
-        if d.get("role") in PERSON_ROLES or (d.get("category") == "PERSON" and d.get("verification_status") == "Verified"):
-            people.append({
-                "id": f"p:roi:{d['id']}", "name": d.get("subject_name") or "Unidentified person",
-                "aliases": [], "role": d.get("role"), "role_source": "investigator" if d.get("role") else None,
-                "needs_review": not d.get("role"), "verified": d.get("verification_status") == "Verified",
-                "evidence_count": 1, "strength": None,
-                "photos": [_photo(d, names, d.get("label") or "person")],
-                "support": [{"evidence_id": d["evidence_id"], "file_name": names.get(d["evidence_id"]),
-                             "source": "VLM_ROI", "at": d.get("timestamp_str"),
-                             "text": f"{d.get('label')}: " + "; ".join(_details(d)[:3]),
-                             "verified": d.get("verification_status") == "Verified", "clue_id": None}],
-            })
-
-    people.sort(key=lambda p: (p["role"] not in PERSON_ROLES, -_RANK[p["strength"]], -p["evidence_count"], p["name"]))
+    # ── people: the full roster (names, badges, ID cards), investigator designations first ──
+    from backend.modules.people_roster import build_roster
+    people = build_roster(ctx, pool, matches, ctx.get("designations", []))
 
     # ── identifiers ──────────────────────────────────────────────────────────
     plate_norms = {c["norm_value"] for c in pool if c["kind"] == "PLATE"}
@@ -324,7 +265,7 @@ def build_key_findings(ctx: Dict[str, Any], pool: List[Dict[str, Any]], matches:
         "people": people, "ids": ids[:40], "items": items, "vehicles": vehicles, "unlinked_plates": loose,
         "totals": {"people": len(people), "ids": len(ids), "items": len(items),
                    "vehicles": len(vehicles), "plates": len(plate_entries),
-                   "investigator_roles": sum(1 for p in people if p["role_source"] == "investigator")},
+                   "investigator_roles": sum(1 for p in people if p.get("role_source"))},
         "notes": ["Roles marked 'text cue' were inferred from a nearby word in the evidence and need review.",
                   "Roles and names set by an investigator when verifying a finding always take priority."],
     }
