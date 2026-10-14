@@ -35,6 +35,8 @@ from backend.database.db import get_db
 from backend.modules import audit_engine, auto_analysis, investigation_service as svc
 from backend.modules.report_engine import build_report_html
 from backend.modules.clue_terms import object_key
+from backend.modules.case_summary import build_key_findings
+from backend.modules.event_timeline import build_event_timeline
 from backend.modules.clue_text import match_key
 from backend.modules.vision import cv_engine
 from backend.modules.vision.objective_lexicon import enforce_objective_lexicon
@@ -577,3 +579,55 @@ async def overview(max_cases: int = Query(12, ge=1, le=50)) -> Dict[str, Any]:
     } for r in rows]
 
     return {"leads": leads[:30], "gaps": gaps[:40], "activity": activity, "stats": stats}
+
+
+# ── key findings (people / ids / items / vehicles) and the event timeline ─────
+
+@router.get("/cases/{case_id}/key-findings")
+async def key_findings(case_id: str) -> Dict[str, Any]:
+    """
+    Who, what and which vehicle: investigator-assigned roles first, automatic
+    cues second, each with the supporting observations from other evidence.
+    """
+    data = await _require_case(case_id)
+    summary = build_key_findings(data["ctx"], data["clues"], data["matches"])
+    summary["case"] = {"id": case_id, "case_number": data["ctx"]["case"].get("case_number"),
+                       "title": data["ctx"]["case"].get("title")}
+    return summary
+
+
+@router.get("/cases/{case_id}/event-timeline")
+async def event_timeline(case_id: str, window_min: int = Query(45, ge=5, le=240)) -> Dict[str, Any]:
+    """Chat, speech and video aligned on one wall-clock, plus the aligned groups."""
+    data = await _require_case(case_id)
+    result = build_event_timeline(data["ctx"], svc.chunk_terms, window_min=window_min)
+    return result
+
+
+class RecordingStartBody(BaseModel):
+    recording_start: str = Field(min_length=5, max_length=19, description="YYYY-MM-DDTHH:MM:SS or HH:MM:SS")
+    operator_id: str = Field(default="OPERATOR", min_length=1, max_length=100)
+
+
+@router.put("/evidence/{evidence_id}/recording-start")
+async def set_recording_start(evidence_id: str, body: RecordingStartBody) -> Dict[str, Any]:
+    """Set the real clock time at which a recording started (overrides the burned-in clock reading)."""
+    from backend.modules.clock import to_datetime
+    if to_datetime(body.recording_start) is None:
+        raise HTTPException(status_code=422, detail="Use YYYY-MM-DDTHH:MM:SS or HH:MM:SS")
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT case_id, file_hash_sha256 FROM evidence WHERE id=%s", (evidence_id,))
+        row = await cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Evidence not found")
+        await db.execute(
+            "UPDATE evidence SET recording_start=%s, recording_start_source='manual' WHERE id=%s",
+            (body.recording_start, evidence_id))
+        await db.commit()
+    finally:
+        await db.close()
+    await audit_engine.append_entry(
+        "RECORDING_START_SET", operator_id=body.operator_id, case_id=row["case_id"], evidence_id=evidence_id,
+        file_hash_sha256=row.get("file_hash_sha256"), metadata={"recording_start": body.recording_start})
+    return {"evidence_id": evidence_id, "recording_start": body.recording_start, "source": "manual"}

@@ -132,6 +132,8 @@ async def analyze_evidence(evidence_id: str) -> Dict[str, Any]:
             result = await run_in_threadpool(auto_analysis.analyze_image, path)
         elif ftype == "DOCUMENT" and str(path).lower().endswith(".pdf"):
             result = await run_in_threadpool(auto_analysis.analyze_pdf, path)
+        elif ftype == "TEXT":
+            result = await run_in_threadpool(auto_analysis.analyze_text, path)
 
         counts = await _persist(ev, result)
         warnings = list(result.warnings) if result else []
@@ -274,6 +276,27 @@ async def _persist(ev: Dict[str, Any], result) -> Dict[str, int]:
                         (_uid(), evidence_id, i, text[:20000], stype, page_no))
                     counts["document_pages"] += 1
 
+            # Chat / text export -> one chunk per message, with speaker and wall-clock time
+            if result.messages:
+                await db.execute("DELETE FROM text_chunks WHERE evidence_id=%s AND source_type='CHAT'", (evidence_id,))
+                for i, msg in enumerate(result.messages):
+                    await db.execute(
+                        """INSERT INTO text_chunks
+                           (id, evidence_id, chunk_index, content, source_type, speaker, wall_time)
+                           VALUES (%s,%s,%s,%s,'CHAT',%s,%s)""",
+                        (_uid(), evidence_id, i, msg.text[:4000], (msg.author or "")[:80] or None, msg.wall_time))
+                    counts["document_pages"] += 1
+
+            # Burned-in CCTV clock -> real recording start (never overrides a manual value)
+            if result.kind == "VIDEO" and result.texts:
+                from backend.modules.clock import derive_recording_start
+                rs = derive_recording_start([(t.text, t.ts_ms) for t in result.texts])
+                if rs is not None:
+                    await db.execute(
+                        """UPDATE evidence SET recording_start=%s, recording_start_source='overlay'
+                           WHERE id=%s AND (recording_start_source IS NULL OR recording_start_source<>'manual')""",
+                        (rs.value, evidence_id))
+
             # EXIF location / capture time (never overwrite a manually set location)
             if result.exif:
                 ex = result.exif
@@ -338,7 +361,7 @@ async def load_case_context(case_id: str) -> Dict[str, Any]:
         detections = [dict(r) for r in await cur.fetchall()]
         cur = await db.execute(
             """SELECT t.id, t.evidence_id, t.chunk_index, t.content, t.source_type, t.page_number,
-                      t.start_time, t.end_time
+                      t.start_time, t.end_time, t.wall_time, t.speaker
                FROM text_chunks t JOIN evidence e ON e.id=t.evidence_id
                WHERE e.case_id=%s ORDER BY t.evidence_id, t.chunk_index""", (case_id,))
         chunks = [dict(r) for r in await cur.fetchall()]
@@ -350,7 +373,10 @@ async def load_case_context(case_id: str) -> Dict[str, Any]:
 
 
 def _chunk_source(source_type: Optional[str]) -> str:
-    return "DOCUMENT" if str(source_type or "").upper().startswith("PDF") else "TRANSCRIPT"
+    st = str(source_type or "").upper()
+    if st == "CHAT":
+        return "CHAT"
+    return "DOCUMENT" if st.startswith("PDF") else "TRANSCRIPT"
 
 
 _PLATE_NOTE = re.compile(r"licen[cs]e|number\s*plate|\bplate\b|registration", re.I)
@@ -415,7 +441,8 @@ def _clue_dicts(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "value": c["value"], "norm_value": c["norm_value"],
                     "confidence": c["confidence"], "source": c["source"],
                     "timestamp_ms": c["timestamp_ms"], "context": c["context"],
-                    "bbox": bbox, "verified": False})
+                    "bbox": bbox, "verified": False,
+                    "det_id": c["id"] if c["source"] == "AUTO_YOLO" else None})
 
     # 2. text chunks -> clues (one clue per evidence/kind/value, earliest occurrence)
     seen: Dict[tuple, Dict[str, Any]] = {}
@@ -425,13 +452,15 @@ def _clue_dicts(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
         where = f"page {ch['page_number']}: " if ch.get("page_number") else ""
         for c in chunk_terms(ch.get("content") or ""):
             value, norm, context = _fix_plate(c.kind, c.value, c.norm, c.context)
+            if source == "CHAT" and ch.get("speaker"):
+                context = f"{ch['speaker']}: {context}"
             key = (ch["evidence_id"], c.kind, norm)
             if key in seen:
                 seen[key]["_n"] += 1
                 continue
             d = {"id": f"chunk:{ch['id']}:{c.kind}:{norm}"[:190], "evidence_id": ch["evidence_id"],
                  "kind": c.kind, "value": value, "norm_value": norm,
-                 "confidence": 0.9 if source == "DOCUMENT" else 0.6, "source": source,
+                 "confidence": 0.9 if source in ("DOCUMENT", "CHAT") else 0.6, "source": source,
                  "timestamp_ms": ts, "context": where + context, "bbox": None,
                  "verified": False, "chunk_id": ch["id"], "_n": 1,
                  "weight": float(getattr(c, "weight", 1.0))}
@@ -442,6 +471,20 @@ def _clue_dicts(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
         if n > 1:
             d["context"] = f"{d['context']} (mentioned {n}x)"
 
+    # chat authors are people in the case: each speaker becomes a NAME clue
+    for ch in ctx.get("chunks", []):
+        sp = (ch.get("speaker") or "").strip()
+        if _chunk_source(ch.get("source_type")) == "CHAT" and len(sp) >= 3:
+            norm = re.sub(r"[\s._\-]+", " ", sp).lower().strip()
+            key = (ch["evidence_id"], "NAME", norm)
+            if key not in seen:
+                d = {"id": f"chunk:{ch['id']}:NAME:{norm}"[:190], "evidence_id": ch["evidence_id"], "kind": "NAME",
+                     "value": sp, "norm_value": norm, "confidence": 0.9, "source": "CHAT", "timestamp_ms": None,
+                     "context": f"Author of chat messages ({ch.get('wall_time') or 'time unknown'})",
+                     "bbox": None, "verified": False, "chunk_id": ch["id"], "weight": 1.0}
+                seen[key] = d
+                out.append(d)
+
     # 3. operator regional scans -> clues
     for d in ctx["detections"]:
         if d.get("source") != "VLM_ROI":
@@ -450,7 +493,22 @@ def _clue_dicts(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
         ts = int(float(d.get("frame_timestamp") or 0) * 1000)
         conf = float(d.get("confidence") or 0)
         base = {"evidence_id": d["evidence_id"], "confidence": conf, "source": "VLM_ROI",
-                "timestamp_ms": ts, "bbox": None, "verified": verified}
+                "timestamp_ms": ts, "bbox": None, "verified": verified,
+                "role": d.get("role"), "det_id": d["id"]}
+        # The investigator's own words are the strongest clue: a verified scan named
+        # "J. Vance" (role SUSPECT) becomes a NAME clue that every other source can match.
+        subject = (d.get("subject_name") or "").strip()
+        if subject:
+            role = d.get("role")
+            skind = "NAME" if role in ("VICTIM", "SUSPECT", "WITNESS") or d.get("category") == "PERSON" else (
+                "PLATE" if role == "PLATE" else "ID" if role == "ID" else
+                "LOCATION" if role == "LOCATION" else "OBJECT")
+            snorm = (re.sub(r"[\s._\-]+", " ", subject).lower().strip() if skind == "NAME"
+                     else re.sub(r"[^A-Z0-9]", "", subject.upper()) if skind in ("PLATE", "ID")
+                     else subject.lower())
+            out.append({**base, "id": f"roi:{d['id']}:subject", "kind": skind, "value": subject,
+                        "norm_value": snorm, "confidence": 0.95 if verified else conf,
+                        "context": f"Investigator-assigned {role or 'subject'}: {subject}"})
         label = (d.get("label") or "").strip()
         readout = (d.get("readout_text") or "").strip()
         try:

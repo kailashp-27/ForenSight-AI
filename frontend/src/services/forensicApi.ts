@@ -5,6 +5,9 @@ const BASE = "/api/v1";
 
 export type Category = "PERSON" | "VEHICLE" | "TEXT_OR_CODE" | "OBJECT" | "ANOMALY";
 export type VerificationStatus = "Unverified_Draft" | "Verified";
+export type FindingRole =
+  | "VICTIM" | "SUSPECT" | "WITNESS" | "ITEM" | "WEAPON" | "TOOL" | "STOLEN"
+  | "VEHICLE" | "PLATE" | "ID" | "LOCATION" | "OTHER";
 
 export interface Finding {
   id: string;
@@ -25,6 +28,8 @@ export interface Finding {
   verification_status: VerificationStatus;
   verified_by: string | null;
   verified_at: string | null;
+  role?: FindingRole | null;
+  subject_name?: string | null;
   source_reference: string;
   created_at?: string | null;
 }
@@ -134,10 +139,14 @@ export const forensicApi = {
 
   findings: (evidenceId: string) => request<Finding[]>(`/evidence/${evidenceId}/findings`),
 
-  verify: (id: string, operatorId: string) =>
+  verify: (id: string, operatorId: string, role?: FindingRole | null, subjectName?: string | null) =>
     request<Finding>(`/findings/${id}/verify`, {
       method: "POST",
-      body: JSON.stringify({ operator_id: operatorId }),
+      body: JSON.stringify({
+        operator_id: operatorId,
+        ...(role ? { role } : {}),
+        ...(subjectName && subjectName.trim() ? { subject_name: subjectName.trim() } : {}),
+      }),
     }),
 
   unverify: (id: string, operatorId: string) =>
@@ -149,7 +158,7 @@ export const forensicApi = {
   edit: (
     id: string,
     operatorId: string,
-    changes: { label?: string; readout_text?: string; details?: string[] }
+    changes: { label?: string; readout_text?: string; details?: string[]; role?: FindingRole; subject_name?: string }
   ) =>
     request<Finding>(`/findings/${id}`, {
       method: "PATCH",
@@ -389,4 +398,143 @@ export const caseViewsApi = {
   caseClues: (caseId: string) => request<CaseClue[]>(`/cases/${caseId}/clues`),
   transcripts: (caseId: string) => request<CaseTranscripts>(`/cases/${caseId}/transcripts`),
   overview: () => request<Overview>("/overview"),
+};
+
+// ── Key findings + event timeline ────────────────────────────────────────────
+
+export interface KFSupport {
+  evidence_id: string;
+  file_name: string;
+  source: string | null;
+  at: string | null;
+  text: string;
+  verified: boolean;
+  clue_id: string | null;
+}
+
+export interface KFPhoto {
+  url: string;
+  caption: string;
+  evidence_id: string;
+  file_name: string;
+  at: string | null;
+  source: string | null;
+  verified: boolean;
+  role: string | null;
+}
+
+export interface KFPerson {
+  id: string;
+  name: string;
+  aliases: string[];
+  role: string | null;
+  role_source: string | null;
+  needs_review: boolean;
+  verified: boolean;
+  evidence_count: number;
+  strength: MatchStrength | null;
+  photos: KFPhoto[];
+  support: KFSupport[];
+}
+
+export interface KFId {
+  id: string;
+  value: string;
+  verified: boolean;
+  evidence_count: number;
+  strength: MatchStrength | null;
+  support: KFSupport[];
+  label: string | null;
+}
+
+export interface KFItem {
+  id: string;
+  name: string;
+  display: string;
+  item_class: string;
+  role: string | null;
+  role_source: string | null;
+  verified: boolean;
+  evidence_count: number;
+  strength: MatchStrength | null;
+  photos: KFPhoto[];
+  support: KFSupport[];
+}
+
+export interface KFPlate {
+  plate: string;
+  strength: MatchStrength | null;
+  match_type: string | null;
+  verified: boolean;
+  evidence_count: number;
+  support: KFSupport[];
+}
+
+export interface KFVehicle {
+  id: string;
+  description: string;
+  display: string;
+  verified: boolean;
+  evidence_count: number;
+  strength: MatchStrength | null;
+  plates: KFPlate[];
+  plate_inferred: boolean;
+  photos: KFPhoto[];
+  support: KFSupport[];
+}
+
+export interface KeyFindingsData {
+  people: KFPerson[];
+  ids: KFId[];
+  items: KFItem[];
+  vehicles: KFVehicle[];
+  unlinked_plates: KFPlate[];
+  totals: Record<string, number>;
+  notes: string[];
+}
+
+export interface TimelineEvent {
+  id: string;
+  evidence_id: string;
+  file_name: string;
+  file_type: string | null;
+  kind: "message" | "mention" | "speech" | "scan" | "video" | "document";
+  label: string;
+  text: string;
+  time: string | null;
+  date_known: boolean;
+  assumed_date: boolean;
+  observed: boolean;
+  offset_ms: number | null;
+  terms: { kind: string; value: string; norm: string }[];
+}
+
+export interface EventTimelineData {
+  events: TimelineEvent[];
+  groups: {
+    id: string;
+    start: string;
+    end: string;
+    evidence_ids: string[];
+    file_names: string[];
+    event_ids: string[];
+    linked_undated_ids: string[];
+    shared_terms: { kind: string; value: string }[];
+    assumed_date: boolean;
+    summary: string;
+  }[];
+  assumed_date: string | null;
+  stats: Record<string, number>;
+  notes: string[];
+}
+
+export const caseBoardApi = {
+  keyFindings: (caseId: string) => request<KeyFindingsData>(`/cases/${caseId}/key-findings`),
+  eventTimeline: (caseId: string, windowMin = 45) =>
+    request<EventTimelineData>(`/cases/${caseId}/event-timeline?window_min=${windowMin}`),
+  setRecordingStart: (evidenceId: string, value: string) =>
+    request<unknown>(`/evidence/${evidenceId}/recording-start`, {
+      method: "PUT",
+      body: JSON.stringify({ recording_start: value }),
+    }),
 };

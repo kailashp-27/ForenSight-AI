@@ -33,7 +33,8 @@ from backend.modules.clue_terms import object_key
 from backend.modules.clue_text import match_key
 
 FUZZY_THRESHOLD = 88
-_TEXT_KINDS = {"PLATE", "PHONE", "EMAIL", "ID", "AMOUNT", "NAME", "TEXT", "DATE", "NUMBER", "KEYWORD"}
+_TEXT_KINDS = {"PLATE", "PHONE", "EMAIL", "ID", "AMOUNT", "NAME", "TEXT", "DATE", "NUMBER", "KEYWORD",
+                "TIME", "LOCATION"}
 _FUZZY_KINDS = {"PLATE", "ID", "NAME", "ALNUM"}
 # A plate read by OCR, a partly read plate from a regional scan, a plate typed in a PDF and a
 # camera/serial identifier are all "alphanumeric identifiers": compared together, not by label.
@@ -42,7 +43,8 @@ _ALNUM_FAMILY = {"PLATE", "ID", "TEXT"}
 # they can never reach STRONG on their own.
 # A shared everyday word is weak evidence: keyword overlap is reported (so nothing said or
 # written is lost) but capped well below MEDIUM.
-_KIND_WEIGHT = {"NAME": 0.8, "TEXT": 0.8, "DATE": 0.75, "NUMBER": 0.8, "KEYWORD": 0.5}
+_KIND_WEIGHT = {"NAME": 0.8, "TEXT": 0.8, "DATE": 0.75, "NUMBER": 0.8, "KEYWORD": 0.5,
+                "TIME": 0.6, "LOCATION": 0.8}
 
 _BASE_SCORE = {"EXACT": 0.95, "OCR_VARIANT": 0.85, "PARTIAL": 0.65, "FUZZY": 0.70, "APPEARANCE": 0.35}
 _STRENGTH = [(0.8, "STRONG"), (0.6, "MEDIUM"), (0.0, "WEAK")]

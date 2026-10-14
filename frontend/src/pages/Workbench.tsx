@@ -350,7 +350,7 @@ function WorkbenchForClip({ evidenceId }: { evidenceId: string }) {
             busyId={busyId}
             error={error}
             onDismissError={() => setError(null)}
-            onVerify={(id) => withBusy(id, () => forensicApi.verify(id, operatorId))}
+            onVerify={(id, role, name) => withBusy(id, () => forensicApi.verify(id, operatorId, role, name))}
             onUnverify={(id) => withBusy(id, () => forensicApi.unverify(id, operatorId))}
             onEdit={(id, changes) => withBusy(id, () => forensicApi.edit(id, operatorId, changes))}
             onSeek={seekTo}

@@ -52,7 +52,13 @@ ITEMS: Dict[str, str] = {
     "cellphone": "cell phone", "smartphone": "cell phone", "laptop": "laptop",
     "bottle": "bottle", "wallet": "wallet", "camera": "camera", "rope": "rope",
     "stick": "stick", "bat": "bat", "umbrella": "umbrella", "box": "box", "parcel": "box",
+    "usb": "usb drive", "pendrive": "usb drive", "thumbdrive": "usb drive", "flashdrive": "usb drive",
+    "harddrive": "hard drive", "ssd": "hard drive",
 }
+# "drive" alone is also a verb ("I'll drive there"): it is only an item after one of these.
+_DRIVE_PRE = {"usb", "flash", "thumb", "pen", "hard", "external", "memory", "encrypted", "small", "metallic",
+              "portable", "data", "storage", "the", "a", "that", "this", "my", "your"}
+_GENERIC_ITEMS = {"stick", "box", "bag", "bottle", "bat"}   # lose to a more specific item word
 
 _STOP_CAPS = {
     "The", "This", "That", "These", "Those", "There", "They", "Then", "Them", "Their", "When",
@@ -68,9 +74,54 @@ _STOP_CAPS = {
     "Phone", "Number", "Registration", "Vehicle", "Driver", "Yard", "Road", "Street",
     "Tier", "Level", "Floor", "Room", "Sector", "Unit", "Zone", "Block", "Gate", "Section", "Visitor",
 }
+# Common given names / surnames (Indian + Western). A phrase is only a NAME when it contains one of
+# these, carries a title / initials, follows a naming cue, or is made only of rare words and no
+# place/organisation vocabulary. This is what stops "Cooling Units" or "Apex Dynamics" being people.
+_KNOWN_NAMES = set("""
+ramesh suresh mahesh rajesh dinesh ganesh naresh mukesh hitesh kumar babu priya anita sunita kavita meena
+pooja neha sneha divya lakshmi radha sita gita rahul arjun deepak vijay ajay sanjay anil amit rohit ravi
+krishna vikram manoj prakash mohan sundar senthil murugan karthik selvam raja rani asha usha latha
+singh sharma patel khan reddy iyer nair gupta verma joshi mehta shah das roy ghosh bose pillai menon rao
+john mark paul james david michael robert william richard thomas charles daniel matthew andrew peter steven
+brian kevin george edward jason jack tom sam ben alex chris joe henry oliver harry noah liam ethan
+mary anna maria sarah emma olivia sophia emily jessica jennifer linda susan karen lisa nancy laura mia
+smith jones brown taylor wilson davis miller anderson moore clark lewis walker allen young king wright
+scott baker adams nelson carter mitchell turner phillips campbell parker evans edwards collins stewart
+morris murphy cook rogers morgan cooper peterson reed bailey bell kelly howard ward cox richardson wood
+watson brooks bennett hughes price sanders ross foster powell jenkins perry russell sullivan fisher
+henderson cole vance stone hunt grant mason hayes
+""".split())
+_NOT_NAME_WORDS = set("""
+dynamics systems services solutions technologies industries enterprises group company corporation limited
+ltd inc llc department dept police station units unit log location sign visitor dock cooling loading trash
+scrap server rack security guard maintenance window sector floor entrance exit hall office building warehouse
+bank hospital school college university city town road street avenue park bridge north south east west
+apex page torn emergency repair reason sign-in logbook register report statement summary section incident
+investigation evidence exhibit camera footage cctv shift duty access control panel room tier level zone
+gate bay lot platform terminal tower aisle hangar pier wing block basement rooftop lobby parking garage
+""".split())
+_NAME_CUES = re.compile(
+    r"(?:\bname\b|\bmr\b|\bmrs\b|\bms\b|\bmiss\b|\bdr\b|\bshri\b|\bsmt\b|\bnamed\b|\bcalled\b|\bsigned\b|"
+    r"\bsuspect\b|\bvictim\b|\bwitness\b|\bdriver\b|\bofficer\b|\bowner\b|\bcontact\b|\bguard\b|"
+    r"\bvisitor\b|\bemployee\b|\bmanager\b|\bresident\b|\bby\b)\W{0,3}$", re.I)
 _TITLES = r"(?:Mr|Mrs|Ms|Miss|Dr|Shri|Smt|Sri|Thiru|Mister)\.?"
-_NAME_RE = re.compile(rf"\b(?:{_TITLES}\s+)?([A-Z][a-z]{{2,}}(?:\s+[A-Z][a-z]{{2,}}){{0,2}})\b")
+_NAME_RE = re.compile(rf"\b(?:{_TITLES}\s+)?([A-Z][a-z]{{2,}}(?:\s+[A-Z][a-z]{{2,}}){{0,3}})\b")
 _TAG_RE = re.compile(r"\[[^\]]{1,40}\]:?")           # speaker tags like [Investigator]:
+
+
+def _name_ok(words: List[str], text: str, start: int, titled: bool) -> bool:
+    """Does this capitalised phrase plausibly name a person?"""
+    low = [w.lower() for w in words]
+    if any(w in _NOT_NAME_WORDS for w in low):
+        return False
+    if titled or any(w in _KNOWN_NAMES for w in low):
+        return True
+    if _NAME_CUES.search(text[max(0, start - 28):start]):
+        return True
+    if _zipf is None:
+        return len(words) >= 2
+    # otherwise only phrases made of RARE words (real surnames are rare words)
+    return all(_zipf(w, "en") < 3.8 for w in low)
 
 
 def _words(norm: str) -> List[str]:
@@ -88,9 +139,13 @@ def object_key(norm: str) -> str:
              if w not in {"metallic", "object", "shaped", "a", "an", "the"}]
     if not words:
         return norm.lower().strip()
-    for w in reversed(words):
-        if w in ITEMS:
-            return ITEMS[w]
+    found = [ITEMS[w] for w in words if w in ITEMS]
+    for i, w in enumerate(words):
+        if w == "drive" and i > 0 and (words[i - 1] in _DRIVE_PRE or words[i - 1] in COLOURS):
+            found.append("usb drive")
+    if found:
+        specific = [f for f in found if f not in _GENERIC_ITEMS]
+        return (specific or found)[0]
     for i in range(len(words) - 1, -1, -1):
         if words[i] in VEHICLES:
             colour = next((c for c in words[:i] if c in COLOURS), None)
@@ -122,6 +177,12 @@ def extract_terms(text: str) -> List[TextClue]:
                 norm = object_key(value)
                 found.setdefault(("OBJECT", norm), TextClue("OBJECT", value, norm, "object_phrase", s, e,
                                                             _context(text, s, e)))
+        elif w == "drive" and i > 0 and (low[i - 1] in _DRIVE_PRE or low[i - 1] in COLOURS):
+            colour = low[i - 1] if low[i - 1] in COLOURS else None
+            value = f"{colour} drive" if colour else f"{low[i - 1]} drive"
+            s = tokens[i - 1][1]
+            found.setdefault(("OBJECT", "usb drive"), TextClue("OBJECT", value, "usb drive", "item_word", s,
+                                                               tokens[i][2], _context(text, s, tokens[i][2])))
         elif w in ITEMS:
             colour = low[i - 1] if i > 0 and low[i - 1] in COLOURS else None
             value = f"{colour} {w}" if colour else w
@@ -131,9 +192,11 @@ def extract_terms(text: str) -> List[TextClue]:
                                                         _context(text, s, tokens[i][2])))
 
     # ── names written as initials + surname: "J. Vance", "J.VANCE" ──────────
-    for m in re.finditer(r"\b((?:[A-Z]\.\s?){1,2})([A-Z][A-Za-z]{2,})\b", text):
+    for m in re.finditer(r"(?<![\w-])((?:[A-Z]\.\s?){1,2})([A-Z][A-Za-z]{2,})\b", text):
         initials = re.sub(r"[^A-Za-z]", "", m.group(1)).lower()
         surname = m.group(2).lower()
+        if surname in _NOT_NAME_WORDS:          # "...-V. Visitor pass" is not a person
+            continue
         norm = f"{initials} {surname}"
         s, e = m.span()
         found.setdefault(("NAME", norm), TextClue("NAME", m.group(0), norm, "initials_surname", s, e,
@@ -143,16 +206,21 @@ def extract_terms(text: str) -> List[TextClue]:
     for m in _NAME_RE.finditer(text):
         raw = m.group(1)
         words = raw.split()
-        while words and words[0] in _STOP_CAPS:
+        n_before = len(words)
+        while words and (words[0] in _STOP_CAPS or words[0].lower() in _NOT_NAME_WORDS):
             words = words[1:]
-        while words and words[-1] in _STOP_CAPS:
+        trimmed_front = len(words) != n_before
+        while words and (words[-1] in _STOP_CAPS or words[-1].lower() in _NOT_NAME_WORDS):
             words = words[:-1]
         if not words:
             continue
         name = " ".join(words)
+        titled = bool(re.match(rf"{_TITLES}\s", text[m.start():m.start(1) + 1]))
+        if not _name_ok(words, text, m.start(1), titled):
+            continue
         at_sentence_start = not re.search(r"[A-Za-z0-9,;:]\s*$", text[:m.start()].rstrip()[-3:] or " ") \
             or re.search(r"[.!?]\s*$", text[:m.start()]) is not None or m.start() == 0
-        if len(words) == 1 and (at_sentence_start or words[0] in _STOP_CAPS):
+        if len(words) == 1 and ((at_sentence_start and not trimmed_front) or words[0] in _STOP_CAPS):
             continue                       # a lone capitalised word opening a sentence is just a word
         norm = " ".join(w.lower() for w in words)
         if len(norm) < 4:
@@ -268,6 +336,69 @@ def extract_dates(text: str) -> List[TextClue]:
     return list(found.values())
 
 
+# ── clock times and places ────────────────────────────────────────────────────
+_TIME_RES = [
+    re.compile(r"(?<![\d:.])(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap]\.?m\.?)?(?![\d])", re.I),   # 1:00 AM, 01:34:12
+    re.compile(r"(?<![\d:.])(\d{1,2})\s*([ap]\.?m\.?)(?![a-z])", re.I),                         # 1 AM
+    re.compile(r"(?<![\d])([01]\d|2[0-3])([0-5]\d)\s*(?:hrs|hours|h)\b", re.I),                  # 0134 hrs
+]
+_LOC_WORD = (r"sector|zone|bay|block|building|bldg|room|floor|level|gate|dock|wing|unit|lot|platform|"
+             r"terminal|tower|rack|aisle|bunker|hangar|pier")
+_LOC_RES = [
+    # "Sector 4", "Bay B2", "Gate 7", "Rack #04", "North Dock", "South dock"
+    re.compile(rf"\b(?:(north|south|east|west|upper|lower|main)\s+)?({_LOC_WORD})\b(?:\s*[#-]?\s*([A-Za-z]?\d{{1,3}}[A-Za-z]?))?", re.I),
+    re.compile(r"\b(server\s*room|loading\s*dock|stairwell|basement|rooftop|lobby|warehouse|car\s*park|"
+               r"parking\s*(?:lot|garage)|loading\s*bay|control\s*room|data\s*cent(?:er|re))\b", re.I),
+]
+_QUALIFIED_ALONE = {"dock", "gate", "wing"}      # "the dock" is a place even without a number
+
+
+def extract_times(text: str) -> List[TextClue]:
+    found: Dict[str, TextClue] = {}
+    for i, rx in enumerate(_TIME_RES):
+        for m in rx.finditer(text):
+            g = m.groups()
+            try:
+                if i == 0:
+                    h, mi, ap = int(g[0]), int(g[1]), (g[3] or "")
+                elif i == 1:
+                    h, mi, ap = int(g[0]), 0, g[1]
+                else:
+                    h, mi, ap = int(g[0]), int(g[1]), ""
+            except ValueError:
+                continue
+            ap = ap.lower().replace(".", "")
+            if ap == "pm" and h < 12:
+                h += 12
+            if ap == "am" and h == 12:
+                h = 0
+            if h > 23 or mi > 59:
+                continue
+            if i == 0 and not ap and not g[2] and h > 12 and False:
+                continue
+            norm = f"{h:02d}:{mi:02d}"
+            if norm not in found:
+                s, e = m.span()
+                found[norm] = TextClue("TIME", m.group(0).strip(), norm, f"time_{i}", s, e, _context(text, s, e))
+    return list(found.values())
+
+
+def extract_locations(text: str) -> List[TextClue]:
+    found: Dict[str, TextClue] = {}
+    for m in _LOC_RES[0].finditer(text):
+        compass, word, num = m.group(1), m.group(2).lower(), m.group(3)
+        if not num and not compass and word not in _QUALIFIED_ALONE:
+            continue                    # "the floor", "a unit": too generic without a qualifier
+        norm = " ".join(x for x in [(compass or "").lower(), word, (num or "").lstrip("0").lower() or ("0" if num else "")] if x)
+        s, e = m.span()
+        found.setdefault(norm, TextClue("LOCATION", m.group(0).strip(), norm, "place", s, e, _context(text, s, e)))
+    for m in _LOC_RES[1].finditer(text):
+        norm = re.sub(r"\s+", " ", m.group(1).lower())
+        s, e = m.span()
+        found.setdefault(norm, TextClue("LOCATION", m.group(0).strip(), norm, "place", s, e, _context(text, s, e)))
+    return list(found.values())
+
+
 def extract_all_terms(text: str) -> List[TextClue]:
     """NAME + OBJECT + DATE + NUMBER + KEYWORD clues from free text."""
     if not text or not text.strip():
@@ -275,15 +406,17 @@ def extract_all_terms(text: str) -> List[TextClue]:
     cleaned = _clean(text)
     clues: List[TextClue] = list(extract_terms(text))
     clues += extract_dates(cleaned)
+    clues += extract_times(cleaned)
+    clues += extract_locations(cleaned)
 
     taken_words = set()
     for c in clues:
         taken_words.update(w.lower() for w in re.findall(r"[A-Za-z]+", c.value))
-        if c.kind == "OBJECT":                      # "white van" -> don't also emit "van"/"white"
+        if c.kind in ("OBJECT", "LOCATION"):        # "white van" / "sector 4": no extra "van"/"sector"
             taken_words.update(_words(c.norm))
 
     # long digit strings that are not phones / dates (invoice, account, reference numbers)
-    date_spans = [(c.start, c.end) for c in clues if c.kind == "DATE"]
+    date_spans = [(c.start, c.end) for c in clues if c.kind in ("DATE", "TIME")]
     for m in _NUM_RE.finditer(cleaned):
         s, e = m.span()
         if any(s < de and e > ds for ds, de in date_spans):

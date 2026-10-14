@@ -11,13 +11,15 @@ const SOURCE_LABEL: Record<string, string> = {
   AUTO_OCR: "OCR (on-screen text)",
   TRANSCRIPT: "Speech transcript",
   DOCUMENT: "Document text",
+  CHAT: "Chat message",
   VLM_ROI: "Regional scan",
   EXIF: "Metadata",
 };
 
 const KIND_COLOR: Record<string, string> = {
   PLATE: "#ec4899", PHONE: "#10b981", EMAIL: "#3b82f6", ID: "#a855f7", AMOUNT: "#f59e0b",
-  NAME: "#06b6d4", OBJECT: "#8b5cf6", TEXT: "#94a3b8",
+  NAME: "#06b6d4", OBJECT: "#8b5cf6", TEXT: "#94a3b8", TIME: "#f97316", LOCATION: "#22c55e",
+  DATE: "#eab308", NUMBER: "#64748b", KEYWORD: "#475569",
 };
 
 function fmt(ms: number | null): string {

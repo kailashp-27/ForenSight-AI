@@ -333,6 +333,7 @@ class AnalysisResult:
     warnings: List[str] = field(default_factory=list)
     tracks: List[TrackSummary] = field(default_factory=list)
     ocr_pages: set = field(default_factory=set)
+    messages: list = field(default_factory=list)   # parsed chat messages
     plates: List[PlateFinding] = field(default_factory=list)
     method: str = "legacy"
 
@@ -543,6 +544,25 @@ _OBJECTIVE_CLASS = {
 
 def objective_class_label(cls: str) -> str:
     return _OBJECTIVE_CLASS.get(cls, cls)
+
+
+def analyze_text(path: str | Path) -> AnalysisResult:
+    """Chat / message export or plain text: split into timestamped messages."""
+    from backend.modules.chat_parse import parse_chat
+    raw = Path(path).read_bytes()
+    for enc in ("utf-8-sig", "utf-16", "cp1252"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeError:
+            continue
+    else:
+        text = raw.decode("utf-8", errors="replace")
+    result = AnalysisResult(kind="TEXT")
+    result.messages = parse_chat(text)
+    if not result.messages:
+        result.warnings.append("The file contains no readable text.")
+    return result
 
 
 def category_for(cls: str) -> str:

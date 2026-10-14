@@ -5,23 +5,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  ArrowLeft, Download, FileText, GraduationCap, Link2, ListChecks, Loader2, MapPin, MessageSquareText, Network, Play,
+  ArrowLeft, Clock, Download, Fingerprint, FileText, GraduationCap, Link2, ListChecks, Loader2, MapPin, MessageSquareText, Network, Play,
   Printer, Sparkles,
 } from "lucide-react";
 import { casesApi, type Case } from "../services/api";
 import {
-  investigationApi, caseViewsApi, type AnalysisStatus, type CaseClue, type CaseGraph, type CaseMapData,
+  investigationApi, caseViewsApi, caseBoardApi, type EventTimelineData, type KeyFindingsData, type AnalysisStatus, type CaseClue, type CaseGraph, type CaseMapData,
   type CaseTranscripts, type ClueMatch, type Correlations,
 } from "../services/forensicApi";
 import { ClueMatches } from "../components/investigation/ClueMatches";
 import { ClueList } from "../components/investigation/ClueList";
+import { KeyFindings } from "../components/investigation/KeyFindings";
+import { EventTimeline } from "../components/investigation/EventTimeline";
 import { TranscriptsPanel } from "../components/investigation/TranscriptsPanel";
 import { ReviewQueue } from "../components/investigation/ReviewQueue";
 import { CaseMap } from "../components/investigation/CaseMap";
 import { EntityGraph } from "../components/cctv/EntityGraph";
 import { AiDisclaimerBanner } from "../components/ai/AiDisclaimerBanner";
 
-type Tab = "matches" | "clues" | "transcripts" | "review" | "map" | "graph" | "report";
+type Tab = "key" | "timeline" | "matches" | "clues" | "transcripts" | "review" | "map" | "graph" | "report";
 
 const STATUS_COLOR: Record<string, string> = {
   COMPLETED: "#10b981", PARTIAL: "#f59e0b", RUNNING: "#3b82f6", FAILED: "#ef4444", NOT_RUN: "#64748b",
@@ -37,8 +39,10 @@ export function Investigation() {
   const [map, setMap] = useState<CaseMapData | null>(null);
   const [graph, setGraph] = useState<CaseGraph | null>(null);
   const [clues, setClues] = useState<CaseClue[] | null>(null);
+  const [keyFindings, setKeyFindings] = useState<KeyFindingsData | null>(null);
+  const [events, setEvents] = useState<EventTimelineData | null>(null);
   const [transcripts, setTranscripts] = useState<CaseTranscripts | null>(null);
-  const [tab, setTab] = useState<Tab>("matches");
+  const [tab, setTab] = useState<Tab>("key");
   const [highlight, setHighlight] = useState<ClueMatch | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
@@ -47,13 +51,17 @@ export function Investigation() {
   const loadViews = useCallback(async () => {
     if (!caseId) return;
     try {
-      const [c, m, g, cl, tr] = await Promise.all([
+      const [c, m, g, cl, tr, kf, ev] = await Promise.all([
         investigationApi.correlations(caseId),
         investigationApi.map(caseId),
         investigationApi.clueGraph(caseId),
         caseViewsApi.caseClues(caseId),
         caseViewsApi.transcripts(caseId),
+        caseBoardApi.keyFindings(caseId),
+        caseBoardApi.eventTimeline(caseId),
       ]);
+      setKeyFindings(kf);
+      setEvents(ev);
       setCorr(c);
       setMap(m);
       setGraph(g);
@@ -244,6 +252,9 @@ export function Investigation() {
       )}
 
       <div style={{ padding: "0.75rem 1.25rem", display: "flex", gap: 4 }} role="tablist">
+        {tabBtn("key", "Key findings", <Fingerprint size={14} />,
+                (keyFindings?.people.length ?? 0) + (keyFindings?.items.length ?? 0) + (keyFindings?.vehicles.length ?? 0))}
+        {tabBtn("timeline", "Event timeline", <Clock size={14} />, events?.groups.length)}
         {tabBtn("matches", "Matching clues", <Link2 size={14} />, (totals?.strong ?? 0) + (totals?.medium ?? 0))}
         {tabBtn("clues", "All clues", <ListChecks size={14} />, totals?.clues)}
         {tabBtn("transcripts", "Transcripts & text", <MessageSquareText size={14} />, transcripts?.totals.passages)}
@@ -260,6 +271,20 @@ export function Investigation() {
             highlightedId={highlight?.id}
             onHighlight={setHighlight}
             onOpenMember={openMember}
+          />
+        )}
+
+        {tab === "key" && (
+          <KeyFindings
+            data={keyFindings}
+            onOpen={(eid, ms) => openMember(eid, typeOf(eid), ms)}
+          />
+        )}
+
+        {tab === "timeline" && (
+          <EventTimeline
+            data={events}
+            onOpen={(eid, ftype, ms) => openMember(eid, ftype ?? typeOf(eid), ms)}
           />
         )}
 

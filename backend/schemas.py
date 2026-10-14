@@ -19,6 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 Category = Literal["PERSON", "VEHICLE", "TEXT_OR_CODE", "OBJECT", "ANOMALY"]
 VerificationStatus = Literal["Unverified_Draft", "Verified"]
+FindingRole = Literal["VICTIM", "SUSPECT", "WITNESS", "ITEM", "WEAPON", "TOOL", "STOLEN",
+                      "VEHICLE", "PLATE", "ID", "LOCATION", "OTHER"]
 
 
 # ── Scan request / VLM output ────────────────────────────────────────────────
@@ -110,6 +112,8 @@ class Finding(BaseModel):
     verification_status: VerificationStatus
     verified_by: Optional[str] = None
     verified_at: Optional[str] = None
+    role: Optional[FindingRole] = None          # what the investigator says this is
+    subject_name: Optional[str] = None          # who/what it is, in the investigator's words
     source_reference: str
     created_at: Optional[str] = None
 
@@ -125,6 +129,8 @@ class ScanResponse(BaseModel):
 class VerifyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operator_id: str = Field(min_length=1, max_length=100)
+    role: Optional[FindingRole] = None
+    subject_name: Optional[str] = Field(default=None, min_length=1, max_length=120)
 
 
 class FindingEdit(BaseModel):
@@ -136,6 +142,8 @@ class FindingEdit(BaseModel):
     label: Optional[str] = Field(default=None, min_length=1, max_length=120)
     readout_text: Optional[str] = Field(default=None, max_length=500)
     details: Optional[List[str]] = Field(default=None, max_length=3)
+    role: Optional[FindingRole] = None
+    subject_name: Optional[str] = Field(default=None, min_length=1, max_length=120)
 
 
 class VideoMeta(BaseModel):

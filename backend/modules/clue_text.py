@@ -87,6 +87,9 @@ _CUE_RE = re.compile(
     r"(?:number\s*plate|licen[cs]e\s*plate|registration(?:\s*(?:no|number))?|reg\.?\s*no|"
     r"plate(?:\s*(?:no|number))?|vehicle\s*(?:no|number)|\breg\b)\.?\s*[:#\-\u2013]?\s*"
     r"([A-Za-z0-9][A-Za-z0-9 \-]{2,24})", re.I)
+_ID_CUE_RE = re.compile(
+    r"\b(?:badge|employee|emp|staff|visitor|pass|serial|ticket|account|acct|ref(?:erence)?|id|i\.d\.|ssn|licen[cs]e)"
+    r"\s*(?:id|no\.?|number|num|#)?\s*[:#\-\u2013]\s*([A-Za-z0-9][A-Za-z0-9\-]{2,19})\b", re.I)
 _CUE_WORDS = re.compile(r"plate|registration|\breg\b|licen[cs]e|vehicle|number", re.I)
 _CUE_FILLER = {"was", "is", "are", "no", "number", "the", "a", "an", "of", "on", "at", "it", "its",
                "reads", "read", "said", "as", "to", "for", "plate", "reg", "registration"}
@@ -129,6 +132,15 @@ def extract_clues(text: str) -> List[TextClue]:
         if re.search(r"[A-Z]", norm) and re.search(r"\d", norm) and 4 <= len(norm) <= 11 and not overlaps(s, e):
             claimed.append((s, e))
             found.setdefault(("PLATE", norm), TextClue("PLATE", raw, norm, "plate_cue", s, e, _context(text, s, e)))
+
+    # Identifiers announced by a label word: "Badge ID: 4471", "employee no. E-2290", "visitor pass V-221".
+    for m in _ID_CUE_RE.finditer(text):
+        raw = m.group(1)
+        norm = normalize("ID", raw)
+        s, e = m.start(1), m.end(1)
+        if len(norm) >= 3 and re.search(r"\d", norm) and not overlaps(s, e):
+            claimed.append((s, e))
+            found.setdefault(("ID", norm), TextClue("ID", raw, norm, "id_cue", s, e, _context(text, s, e)))
 
     for kind, name, pattern in _PATTERNS:
         # Plates are matched on upper-cased text (OCR case is unreliable);

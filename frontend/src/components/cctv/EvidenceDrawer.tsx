@@ -7,7 +7,16 @@ import React, { useState } from "react";
 import {
   AlertTriangle, BadgeCheck, CheckCircle2, Clock, FileSearch, Info, Loader2, Pencil, Undo2, X,
 } from "lucide-react";
-import type { Finding } from "../../services/forensicApi";
+import type { Finding, FindingRole } from "../../services/forensicApi";
+
+const ROLE_OPTIONS: { value: FindingRole; label: string }[] = [
+  { value: "SUSPECT", label: "Suspect" }, { value: "VICTIM", label: "Victim" },
+  { value: "WITNESS", label: "Witness" }, { value: "STOLEN", label: "Stolen item" },
+  { value: "WEAPON", label: "Weapon" }, { value: "TOOL", label: "Tool" },
+  { value: "ITEM", label: "Other item" }, { value: "VEHICLE", label: "Vehicle" },
+  { value: "PLATE", label: "Number plate" }, { value: "ID", label: "ID / badge" },
+  { value: "LOCATION", label: "Location" },
+];
 
 interface EvidenceDrawerProps {
   findings: Finding[];
@@ -16,9 +25,9 @@ interface EvidenceDrawerProps {
   latestFindingId?: string | null;
   busyId?: string | null;
   error?: string | null;
-  onVerify: (id: string) => void;
+  onVerify: (id: string, role?: FindingRole | null, subjectName?: string | null) => void;
   onUnverify: (id: string) => void;
-  onEdit: (id: string, changes: { label?: string; readout_text?: string }) => void;
+  onEdit: (id: string, changes: { label?: string; readout_text?: string; role?: FindingRole; subject_name?: string }) => void;
   onSeek: (timestampMs: number) => void;
   onDismissError?: () => void;
 }
@@ -60,21 +69,25 @@ function FindingCard({
   f: Finding;
   isLatest: boolean;
   busy: boolean;
-  onVerify: () => void;
+  onVerify: (role?: FindingRole | null, subjectName?: string | null) => void;
   onUnverify: () => void;
-  onEdit: (changes: { label?: string; readout_text?: string }) => void;
+  onEdit: (changes: { label?: string; readout_text?: string; role?: FindingRole; subject_name?: string }) => void;
   onSeek: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [label, setLabel] = useState(f.label);
   const [readout, setReadout] = useState(f.readout_text);
+  const [role, setRole] = useState<FindingRole | "">((f.role as FindingRole) ?? "");
+  const [subject, setSubject] = useState(f.subject_name ?? "");
   const verified = f.verification_status === "Verified";
   const accent = verified ? "#10b981" : "#f59e0b";
 
   const save = () => {
-    const changes: { label?: string; readout_text?: string } = {};
+    const changes: { label?: string; readout_text?: string; role?: FindingRole; subject_name?: string } = {};
     if (label.trim() && label !== f.label) changes.label = label.trim();
     if (readout !== f.readout_text) changes.readout_text = readout;
+    if (role && role !== (f.role ?? "")) changes.role = role;
+    if (subject.trim() && subject.trim() !== (f.subject_name ?? "")) changes.subject_name = subject.trim();
     if (Object.keys(changes).length) onEdit(changes);
     setEditing(false);
   };
@@ -146,6 +159,18 @@ function FindingCard({
             Readout text (exact visible characters or NONE)
             <input style={input} value={readout} maxLength={500} onChange={(e) => setReadout(e.target.value)} />
           </label>
+          <label style={{ fontSize: "0.68rem", color: "var(--color-text-muted)" }}>
+            Who / what is this?
+            <input style={input} value={subject} maxLength={120} placeholder="e.g. J. Vance, silver USB drive, TX-882-V"
+                   onChange={(e) => setSubject(e.target.value)} />
+          </label>
+          <label style={{ fontSize: "0.68rem", color: "var(--color-text-muted)" }}>
+            Role
+            <select style={input} value={role} onChange={(e) => setRole(e.target.value as FindingRole | "")}>
+              <option value="">— not assigned —</option>
+              {ROLE_OPTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </select>
+          </label>
           {verified && (
             <p style={{ fontSize: "0.68rem", color: "#f59e0b" }}>
               Saving a change will reset this finding to Unverified Draft.
@@ -193,6 +218,20 @@ function FindingCard({
         </p>
       )}
 
+      {(f.role || f.subject_name) && (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          {f.role && (
+            <span style={{ fontSize: "0.65rem", fontWeight: 700, color: "#22d3ee", border: "1px solid #22d3ee",
+                           borderRadius: 4, padding: "0 6px" }}>
+              {ROLE_OPTIONS.find((r) => r.value === f.role)?.label ?? f.role}
+            </span>
+          )}
+          {f.subject_name && (
+            <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--color-text-primary)" }}>{f.subject_name}</span>
+          )}
+        </div>
+      )}
+
       {/* source reference */}
       <div style={{ fontSize: "0.65rem", color: "var(--color-text-subtle)", fontFamily: "monospace", wordBreak: "break-all" }}>
         <FileSearch size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "-1px" }} />
@@ -209,7 +248,8 @@ function FindingCard({
               <Undo2 size={12} /> Revoke verification
             </button>
           ) : (
-            <button onClick={onVerify} disabled={busy} style={smallBtn("#059669", "#fff")} aria-label="Verify and approve for report">
+            <button onClick={() => onVerify(role || null, subject || null)} disabled={busy}
+                    style={smallBtn("#059669", "#fff")} aria-label="Verify and approve for report">
               {busy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
               Verify &amp; Approve for Report
             </button>
@@ -303,7 +343,7 @@ export function EvidenceDrawer({
                 f={f}
                 isLatest={f.id === latestFindingId}
                 busy={busyId === f.id}
-                onVerify={() => onVerify(f.id)}
+                onVerify={(r, n) => onVerify(f.id, r, n)}
                 onUnverify={() => onUnverify(f.id)}
                 onEdit={(c) => onEdit(f.id, c)}
                 onSeek={() => onSeek(f.timestamp_ms)}

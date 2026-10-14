@@ -123,6 +123,8 @@ def _row_to_finding(row: Dict[str, Any]) -> Finding:
         verification_status=row.get("verification_status") or "Unverified_Draft",
         verified_by=row.get("verified_by"),
         verified_at=row.get("verified_at"),
+        role=row.get("role"),
+        subject_name=row.get("subject_name"),
         source_reference=(
             f"evidence:{row['evidence_id']} frame:{row.get('frame_index')} "
             f"t={row.get('timestamp_str')} roi={roi}"
@@ -246,6 +248,39 @@ async def scan_roi(body: VLMScanRequest, request: Request) -> ScanResponse:
 
 # ── video meta / findings ────────────────────────────────────────────────────
 
+@router.get("/findings/{finding_id}/crop")
+async def finding_crop(finding_id: str):
+    """JPEG of the region an investigator marked (10 percent context) — the 'photo' of a finding."""
+    import cv2
+    from fastapi.responses import Response
+
+    row = await _load_finding_row(finding_id)
+    ev = await _get_video_evidence(row["evidence_id"])
+    try:
+        x1, y1, x2, y2 = (int(v) for v in json.loads(row.get("bounding_box") or "[]"))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="Finding has no usable region")
+
+    def _render() -> bytes:
+        frame, _info, _probe = cv_engine.extract_frame(ev["file_path"], frame_index=int(row.get("frame_index") or 0))
+        h, w = frame.shape[:2]
+        px, py = int((x2 - x1) * 0.1), int((y2 - y1) * 0.1)
+        crop = frame[max(0, y1 - py): min(h, y2 + py), max(0, x1 - px): min(w, x2 + px)]
+        if crop.size == 0:
+            raise cv_engine.VideoError("Empty crop")
+        if max(crop.shape[:2]) < 160:
+            s = 160 / max(crop.shape[:2])
+            crop = cv2.resize(crop, None, fx=s, fy=s, interpolation=cv2.INTER_CUBIC)
+        ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        return buf.tobytes()
+
+    try:
+        data = await run_in_threadpool(_render)
+    except (cv_engine.VideoError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
+
+
 @router.get("/video/{evidence_id}/meta", response_model=VideoMeta)
 async def video_meta(evidence_id: str) -> VideoMeta:
     ev = await _get_video_evidence(evidence_id)
@@ -290,9 +325,10 @@ async def verify_finding(finding_id: str, body: VerifyRequest) -> Finding:
     try:
         await db.execute(
             """UPDATE detections
-               SET verification_status = 'Verified', verified_by = %s, verified_at = %s
+               SET verification_status = 'Verified', verified_by = %s, verified_at = %s,
+                   role = COALESCE(%s, role), subject_name = COALESCE(%s, subject_name)
                WHERE id = %s""",
-            (body.operator_id, verified_at, finding_id),
+            (body.operator_id, verified_at, body.role, body.subject_name, finding_id),
         )
         await db.commit()
     finally:
@@ -302,7 +338,7 @@ async def verify_finding(finding_id: str, body: VerifyRequest) -> Finding:
         "FINDING_VERIFIED", operator_id=body.operator_id, case_id=row["case_id"],
         evidence_id=row["evidence_id"], file_hash_sha256=row.get("evidence_hash"),
         metadata={"finding_id": finding_id, "crop_sha256": row.get("crop_sha256"),
-                  "label": row["label"]},
+                  "label": row["label"], "role": body.role, "subject_name": body.subject_name},
     )
     return _row_to_finding(await _load_finding_row(finding_id))
 
@@ -352,6 +388,10 @@ async def edit_finding(finding_id: str, body: FindingEdit) -> Finding:
         texts, ok = enforce_many(body.details)
         changes["details_json"] = json.dumps(texts[:3])
         compliant = compliant and ok
+    if body.role is not None:
+        changes["role"] = body.role
+    if body.subject_name is not None:
+        changes["subject_name"] = body.subject_name
     if not changes:
         raise HTTPException(status_code=422, detail="No editable fields supplied")
 

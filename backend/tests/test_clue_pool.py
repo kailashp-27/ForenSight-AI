@@ -95,7 +95,7 @@ def test_keywords_dates_and_numbers_are_extracted_and_filler_is_not():
     got = {(c.kind, c.norm) for c in terms}
     assert ("DATE", "2026-10-11") in got
     assert ("NUMBER", "458921") in got
-    assert ("KEYWORD", "warehouse") in got
+    assert ("LOCATION", "warehouse") in got   # a place, not just a word
     assert not any(c.kind == "KEYWORD" and c.norm in {"said", "that", "people"} for c in terms)
 
 

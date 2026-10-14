@@ -201,3 +201,22 @@ unfinished/missing items, Activity = recent custody-log entries. There are no hy
 **Keywords, dates and numbers.** Beyond plates, names and objects, every meaningful word in a transcript, PDF or scan note becomes a KEYWORD clue (filler words are dropped using a word-frequency table); dates are normalised (`11/10/2026` = `11 October 2026`) and long digit strings become NUMBER clues. Shared keywords are listed in their own section of **Matching clues**; they are always rated WEAK because ordinary words can coincide by chance, while shared dates and numbers are MEDIUM.
 
 **Identifier matching.** Plates, camera/serial IDs and scan readouts are compared as one family, so a partly read plate from a regional scan (`TX-88-2`) links to the full plate in a PDF (`Plate: Tx-882-V`). A reading is linked when it is identical, differs only by OCR confusions, is within 1-2 character edits, or is contained in the other (`RACK04` in `Server Rack #04`; shown as a PARTIAL match). A word such as "plate" or "registration" before an identifier marks it as a plate even when its shape is unusual. Scene-OCR near-duplicates are clustered and voted into one clue. Re-run automatic analysis on an existing video to apply the consolidation to its stored OCR clues.
+
+---
+
+## Key findings and event timeline
+
+**Chat / message exports** (Slack JSON, WhatsApp-style `.txt`, `.csv`, logs) can be uploaded as evidence. Each message keeps its
+author and time; authors become NAME clues, so a chat user `j.vance` links to a badge reading `J.VANCE`.
+
+**Key findings** tab: *Victim & suspects* (name, role, photo), *IDs & badges*, *Tools / weapons / stolen items*, *Vehicle & number
+plate*, each with the supporting observations from other evidence. When you verify a regional scan you can give it a **role**
+(suspect, victim, stolen item, weapon, plate, ID...) and a **name**; investigator-assigned roles always outrank automatic
+text cues, and verified findings become clues that the rest of the case is searched for.
+
+**Event timeline** tab: chat messages, times mentioned in text ("window at 1:00 AM"), speech and video frames on one clock.
+A video's real start time is read from its burned-in overlay (needs >= 2 consistent frames) or set with
+`PUT /api/v1/evidence/{id}/recording-start`. Events that are close in time and share a place, person, plate or ID are grouped;
+events with no time are attached only through such a shared term and marked as linked by content. Times without a date are
+placed on the case's most common date and flagged as assumed.
+

@@ -43,7 +43,14 @@ ALLOWED_TYPES: dict[str, str] = {
     "audio/ogg": "AUDIO",
     # Documents
     "application/pdf": "DOCUMENT",
+    # Chat / message exports and plain text (Slack JSON, WhatsApp .txt, logs)
+    "text/plain": "TEXT",
+    "text/csv": "TEXT",
+    "text/markdown": "TEXT",
+    "application/json": "TEXT",
 }
+# Browsers often send a generic MIME for these; fall back to the file extension.
+_TEXT_EXTENSIONS = {".txt", ".json", ".csv", ".log", ".md"}
 
 
 # ── Background task stub ─────────────────────────────────────────────────────
@@ -144,6 +151,8 @@ async def upload_evidence(
     # Validate MIME type
     mime = file.content_type or ""
     file_type = ALLOWED_TYPES.get(mime)
+    if not file_type and Path(file.filename or "").suffix.lower() in _TEXT_EXTENSIONS:
+        file_type, mime = "TEXT", "text/plain"
     if not file_type:
         raise HTTPException(
             status_code=415,
