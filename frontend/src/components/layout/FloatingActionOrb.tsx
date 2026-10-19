@@ -3,13 +3,14 @@ import React, { useState, useEffect, useRef } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   Plus, LayoutDashboard, FolderOpen, FileVideo,
-  BarChart2, Settings, X,
+  BarChart2, Settings, X, Users,
 } from "lucide-react";
 
 const NAV_ITEMS = [
   { to: "/",         icon: LayoutDashboard, label: "Dashboard" },
   { to: "/cases",    icon: FolderOpen,      label: "Cases" },
   { to: "/evidence", icon: FileVideo,       label: "Evidence" },
+  { to: "/citizens", icon: Users,           label: "Citizens" },
   { to: "/reports",  icon: BarChart2,       label: "Reports" },
   { to: "/settings", icon: Settings,        label: "Settings" },
 ];

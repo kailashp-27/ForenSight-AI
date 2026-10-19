@@ -289,6 +289,7 @@ export function Investigation() {
         {tab === "people" && caseId && (
           <PeopleRoster
             people={peopleData?.people ?? null}
+            repeat={peopleData?.repeat_people}
             caseId={caseId}
             operatorId={localStorage.getItem("forensight.operatorId") || "OPERATOR-1"}
             onChanged={() => void loadViews()}

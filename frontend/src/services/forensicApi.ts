@@ -388,6 +388,7 @@ export interface OverviewActivity {
 }
 
 export interface Overview {
+  repeat_people?: CitizenAlert[];
   leads: OverviewLead[];
   gaps: OverviewGap[];
   activity: OverviewActivity[];
@@ -556,7 +557,7 @@ export interface RosterPerson {
   suggested_reason: string | null;
   needs_review: boolean;
   verified: boolean;
-  identifiers: { value: string; norm: string; how: string; file_name: string; at: string | null; source: string | null }[];
+  identifiers: { value: string; norm: string; kind?: string; how: string; file_name: string; at: string | null; source: string | null }[];
   photos: KFPhoto[];
   support: KFSupport[];
   evidence_count: number;
@@ -566,9 +567,14 @@ export interface RosterPerson {
   unidentified?: boolean;
   designation: { basis: string | null; by: string | null; at: string | null } | null;
   has_designation_row: boolean;
+  citizen_matches?: PersonCitizenMatch[];
 }
 
 export interface PeopleResponse {
+  repeat_people: {
+    person_key: string; person_name: string; citizen_id: number; citizen_name: string;
+    status: string; other_cases: { case_id: string; case_number: string; role: string | null }[];
+  }[];
   people: RosterPerson[];
   roles: PersonRole[];
   totals: { people: number; designated: number; unassigned: number; with_badge_or_id: number };
@@ -604,4 +610,105 @@ export const peopleApi = {
     request<unknown>(`/cases/${caseId}/people/${encodeURIComponent(key)}?operator_id=${encodeURIComponent(operatorId)}`, {
       method: "DELETE",
     }),
+};
+
+// ── Citizen register ─────────────────────────────────────────────────────────
+
+export interface CitizenSummary {
+  id: number;
+  full_name: string;
+  dob: string | null;
+  age: number | null;
+  phone: string | null;
+  address: string | null;
+  occupation: string | null;
+  criminal_record: string | null;
+  status: string | null;
+  has_record: boolean;
+  has_photo: boolean;
+  photo_url: string;
+  case_count: number;
+  multi_case: boolean;
+}
+
+export interface CitizenLink {
+  case_id: string;
+  case_number: string;
+  case_title: string;
+  case_status: string;
+  person_key: string;
+  person_name: string;
+  role: string | null;
+  status: "SUGGESTED" | "CONFIRMED" | "REJECTED";
+  score: number;
+  level: "STRONG" | "LIKELY" | "POSSIBLE" | null;
+  reasons: string[];
+  counts_for_alert: boolean;
+}
+
+export interface CitizenAlert {
+  citizen_id: number;
+  full_name: string;
+  status: string | null;
+  criminal_record: string | null;
+  photo_url: string;
+  case_count: number;
+  confirmed_cases: number;
+  suspect_cases: number;
+  priority: "HIGH" | "MEDIUM";
+  cases: CitizenLink[];
+  message: string;
+}
+
+export interface CitizenFileData extends Omit<CitizenSummary, "case_count" | "multi_case"> {
+  links: CitizenLink[];
+  alert: CitizenAlert | null;
+  notice: string;
+}
+
+export interface PersonCitizenMatch {
+  citizen_id: number;
+  full_name: string;
+  score: number;
+  level: "STRONG" | "LIKELY" | "POSSIBLE";
+  reasons: string[];
+  status: "SUGGESTED" | "CONFIRMED" | "REJECTED";
+  photo_url: string;
+  citizen_status: string | null;
+  criminal_record: string | null;
+  case_count: number;
+  other_cases: CitizenLink[];
+}
+
+export const citizensApi = {
+  list: (p: { q?: string; status?: string; has_record?: boolean; multi_case?: boolean } = {}) => {
+    const qs = new URLSearchParams();
+    if (p.q) qs.set("q", p.q);
+    if (p.status) qs.set("status", p.status);
+    if (p.has_record !== undefined) qs.set("has_record", String(p.has_record));
+    if (p.multi_case) qs.set("multi_case", "true");
+    return request<{ total: number; items: CitizenSummary[]; statuses: string[]; multi_case_total: number }>(
+      `/citizens?${qs.toString()}`
+    );
+  },
+  file: (id: number | string) => request<CitizenFileData>(`/citizens/${id}`),
+  alerts: () => request<{ alerts: CitizenAlert[]; count: number; high: number }>("/citizens/alerts"),
+  decide: (caseId: string, personKey: string, citizenId: number, decision: "confirm" | "reject" | "reset", operatorId: string) =>
+    request<unknown>(`/cases/${caseId}/people/${encodeURIComponent(personKey)}/citizen-match`, {
+      method: "POST",
+      body: JSON.stringify({ citizen_id: citizenId, decision, operator_id: operatorId }),
+    }),
+  uploadPhoto: async (id: number, file: File, operatorId: string) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`${BASE}/citizens/${id}/photo?operator_id=${encodeURIComponent(operatorId)}`, {
+      method: "PUT",
+      body: fd,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(typeof err.detail === "string" ? err.detail : "Upload failed");
+    }
+    return res.json();
+  },
 };

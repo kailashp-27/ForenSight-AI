@@ -11,6 +11,8 @@ import { EvidenceBrowser } from "./pages/EvidenceBrowser";
 import { Settings } from "./pages/Settings";
 import { Workbench } from "./pages/Workbench";
 import { Investigation } from "./pages/Investigation";
+import { Citizens } from "./pages/Citizens";
+import { CitizenFile } from "./pages/CitizenFile";
 
 function PlaceholderPage({ title, subtitle }: { title: string; subtitle: string }) {
   return (
@@ -72,6 +74,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/cases/:id" element={<CaseDetail />} />
           <Route path="/cases/:id/investigation" element={<Investigation />} />
           <Route path="/evidence"  element={<EvidenceBrowser />} />
+          <Route path="/citizens" element={<Citizens />} />
+          <Route path="/citizens/:id" element={<CitizenFile />} />
           <Route path="/workbench" element={<Workbench />} />
           <Route path="/workbench/:evidenceId" element={<Workbench />} />
           <Route path="/reports"   element={<PlaceholderPage title="Reports" subtitle="Generate investigation reports with cited evidence and AI summaries." />} />

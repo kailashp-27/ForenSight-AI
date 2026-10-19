@@ -8,7 +8,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  ChevronUp, ChevronDown, Zap, AlertCircle, Clock, Brain, CheckCircle, FileSearch, Loader2, RefreshCw,
+  ChevronUp, ChevronDown, Zap, Users, AlertCircle, Clock, Brain, CheckCircle, FileSearch, Loader2, RefreshCw,
 } from "lucide-react";
 import { type ContextPanelItem } from "./ContextPanel";
 import { getSocket } from "../../services/socket";
@@ -68,6 +68,24 @@ function Empty({ icon, title, hint }: { icon: React.ReactNode; title: string; hi
       <div style={{ opacity: 0.6, marginBottom: 6 }}>{icon}</div>
       <p style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text-muted)" }}>{title}</p>
       <p style={{ fontSize: "0.7rem", marginTop: 3, maxWidth: 360 }}>{hint}</p>
+    </div>
+  );
+}
+
+function RepeatPeople({ people }: { people: NonNullable<Overview["repeat_people"]> }) {
+  if (!people.length) return null;
+  return (
+    <div data-testid="strip-repeat" style={{ padding: "0.5rem 1rem 0", display: "flex", flexDirection: "column", gap: 4 }}>
+      {people.map((p) => (
+        <Link key={p.citizen_id} to={`/citizens/${p.citizen_id}`}
+              style={{ display: "flex", gap: 8, alignItems: "center", padding: "0.4rem 0.6rem", borderRadius: 6, textDecoration: "none",
+                       fontSize: "0.74rem", color: "var(--color-text-primary)",
+                       background: p.priority === "HIGH" ? "rgba(239,68,68,0.1)" : "rgba(245,158,11,0.1)",
+                       border: `1px solid ${p.priority === "HIGH" ? "rgba(239,68,68,0.5)" : "rgba(245,158,11,0.5)"}` }}>
+          <Users size={14} style={{ color: p.priority === "HIGH" ? "#ef4444" : "#f59e0b", flexShrink: 0 }} />
+          <span><strong>{p.full_name}</strong> is in {p.case_count} cases: {p.cases.map((c) => c.case_number).join(", ")}</span>
+        </Link>
+      ))}
     </div>
   );
 }
@@ -270,7 +288,7 @@ export function IntelligenceStrip({ contextItem, onContextSelect }: Intelligence
   }, [contextItem]);
 
   const TABS: { key: Tab; label: string; count?: number; icon: React.ReactNode }[] = [
-    { key: "leads", label: "Leads", count: data?.leads.length, icon: <Zap style={{ width: 11, height: 11 }} /> },
+    { key: "leads", label: "Leads", count: data ? data.leads.length + (data.repeat_people?.length ?? 0) : undefined, icon: <Zap style={{ width: 11, height: 11 }} /> },
     { key: "gaps", label: "Gaps", count: data?.gaps.length, icon: <AlertCircle style={{ width: 11, height: 11 }} /> },
     { key: "activity", label: "Recent Activity", count: data?.activity.length, icon: <Clock style={{ width: 11, height: 11 }} /> },
   ];
@@ -349,7 +367,12 @@ export function IntelligenceStrip({ contextItem, onContextSelect }: Intelligence
               <Empty icon={<Loader2 size={24} className="animate-spin" />} title="Loading…" hint="" />
             ) : (
               <>
-                {activeTab === "leads" && <LeadsTab leads={data.leads} onSelect={onContextSelect} />}
+                {activeTab === "leads" && (
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                    <RepeatPeople people={data.repeat_people ?? []} />
+                    <LeadsTab leads={data.leads} onSelect={onContextSelect} />
+                  </div>
+                )}
                 {activeTab === "gaps" && <GapsTab gaps={data.gaps} />}
                 {activeTab === "activity" && <ActivityTab activity={data.activity} />}
               </>

@@ -7,6 +7,7 @@ import {
   FileVideo,
   Shield,
   ScanSearch,
+  Users,
   Settings,
   Activity,
 } from "lucide-react";
@@ -17,6 +18,7 @@ const navItems = [
   { to: "/cases",   icon: FolderOpen,      label: "Cases" },
   { to: "/evidence",icon: FileVideo,       label: "Evidence" },
   { to: "/workbench",icon: ScanSearch,     label: "Workbench" },
+  { to: "/citizens", icon: Users,          label: "Citizens" },
 ];
 
 export function Sidebar() {

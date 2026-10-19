@@ -168,8 +168,8 @@ def build_roster(
 
     # ── 3. identifiers (badges / ID cards) tied to a person by sharing a scan or message ──
     plate_norms = {c["norm_value"] for c in pool if c["kind"] == "PLATE"}
-    id_clues = [c for c in pool if c["kind"] == "ID" and c["norm_value"] not in plate_norms
-                and len(c["norm_value"]) >= 3]
+    id_clues = [c for c in pool if ((c["kind"] == "ID" and c["norm_value"] not in plate_norms)
+                                    or c["kind"] == "PHONE") and len(c["norm_value"]) >= 3]
     record_of = lambda c: c.get("det_id") or c.get("chunk_id")          # noqa: E731  (same scan / same message)
     NEAR = 90        # characters: an ID this close to a name in a document passage belongs with it
 
@@ -209,12 +209,13 @@ def build_roster(
         idents = []
         for c in id_clues:
             spk = norm_name(c.get("speaker") or "")
-            same_record = record_of(c) in rec_ids and badge_like(c) and near_a_name(c)
-            if same_record or (c["norm_value"] in alias_ids) or (spk and spk in norms and badge_like(c)):
+            ident_ok = badge_like(c) or c["kind"] == "PHONE"
+            same_record = record_of(c) in rec_ids and ident_ok and near_a_name(c)
+            if same_record or (c["norm_value"] in alias_ids) or (spk and spk in norms and ident_ok):
                 how = ("attached by investigator" if c["norm_value"] in alias_ids and record_of(c) not in rec_ids
                        else "same scan" if c.get("det_id") else "same message / passage"
                        if record_of(c) in rec_ids else "sent by this person")
-                idents.append({"value": c["value"], "norm": c["norm_value"], "how": how,
+                idents.append({"value": c["value"], "norm": c["norm_value"], "kind": c["kind"], "how": how,
                                "file_name": names.get(c["evidence_id"], c["evidence_id"]),
                                "at": _ts(c.get("timestamp_ms")), "source": c.get("source")})
                 id_used.add(c["id"])
@@ -303,7 +304,7 @@ def build_roster(
 
     # ── 4. badges / ID cards with no name beside them: "unidentified holder" entries ──
     for c in id_clues:
-        if c["id"] in id_used or not badge_like(c):
+        if c["id"] in id_used or c["kind"] != "ID" or not badge_like(c):
             continue
         norm = c["norm_value"]
         if any(norm == r_i["norm"] for r in roster for r_i in r["identifiers"]):

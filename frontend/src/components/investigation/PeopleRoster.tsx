@@ -9,7 +9,8 @@ import {
   AlertTriangle, BadgeCheck, ChevronDown, ChevronRight, CreditCard, ImageOff, Link2, Loader2, Plus, Search,
   ShieldAlert, UserPlus, X,
 } from "lucide-react";
-import { peopleApi, type PersonRole, type RosterPerson } from "../../services/forensicApi";
+import { Link } from "react-router-dom";
+import { citizensApi, peopleApi, type PeopleResponse, type PersonRole, type RosterPerson } from "../../services/forensicApi";
 
 const ROLE_META: Record<string, { label: string; color: string }> = {
   VICTIM: { label: "Victim", color: "#3b82f6" },
@@ -23,6 +24,7 @@ const ASSIGNABLE: PersonRole[] = ["VICTIM", "SUSPECT", "PERSON_OF_INTEREST", "WI
 
 interface Props {
   people: RosterPerson[] | null;
+  repeat?: PeopleResponse["repeat_people"];
   caseId: string;
   operatorId: string;
   onChanged: () => void;
@@ -34,7 +36,7 @@ function msFromAt(at: string | null): number | null {
   return m ? ((+m[1] * 60 + +m[2]) * 60 + +m[3]) * 1000 + (m[4] ? +m[4].padEnd(3, "0").slice(0, 3) : 0) : null;
 }
 
-export function PeopleRoster({ people, caseId, operatorId, onChanged, onOpen }: Props) {
+export function PeopleRoster({ people, repeat = [], caseId, operatorId, onChanged, onOpen }: Props) {
   const [filter, setFilter] = useState<string>("ALL");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -121,6 +123,24 @@ export function PeopleRoster({ people, caseId, operatorId, onChanged, onOpen }: 
           nearby word; it never suggests or decides guilt. “Guilty” is your own determination and needs a written basis.
         </p>
       </div>
+
+      {repeat.length > 0 && (
+        <div role="alert" data-testid="repeat-banner"
+             style={{ padding: "0.6rem 0.85rem", marginBottom: 10, borderRadius: 8, background: "rgba(245,158,11,0.1)",
+                      border: "1px solid rgba(245,158,11,0.5)", fontSize: "0.78rem", color: "var(--color-text-primary)" }}>
+          <strong style={{ display: "inline-flex", gap: 6, alignItems: "center", color: "#fbbf24" }}>
+            <AlertTriangle size={15} /> Repeat person{repeat.length > 1 ? "s" : ""} across cases
+          </strong>
+          {repeat.map((r) => (
+            <div key={r.person_key + r.citizen_id} style={{ marginTop: 3 }}>
+              <strong>{r.person_name}</strong> matches{" "}
+              <Link to={`/citizens/${r.citizen_id}`} style={{ color: "var(--color-accent)" }}>{r.citizen_name}</Link>{" "}
+              ({r.status === "CONFIRMED" ? "confirmed" : "suggested"}), who is also in{" "}
+              {r.other_cases.map((o) => `${o.case_number}${o.role ? ` as ${o.role.toLowerCase().replace(/_/g, " ")}` : ""}`).join(", ")}.
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
         <div style={{ position: "relative" }}>
@@ -318,6 +338,66 @@ export function PeopleRoster({ people, caseId, operatorId, onChanged, onOpen }: 
                       Cancel
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* citizen register suggestions (never automatic identification) */}
+              {(p.citizen_matches ?? []).length > 0 && (
+                <div data-testid="citizen-matches" style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ fontSize: "0.66rem", fontWeight: 700, color: "var(--color-text-muted)", letterSpacing: "0.04em" }}>
+                    CITIZEN REGISTER {(p.citizen_matches ?? []).some((m) => m.status === "CONFIRMED") ? "" : "— SUGGESTED, NOT CONFIRMED"}
+                  </div>
+                  {(p.citizen_matches ?? []).map((m) => (
+                    <div key={m.citizen_id} style={{ display: "flex", gap: 8, padding: "6px 8px", borderRadius: 8,
+                                                     border: `1px solid ${m.status === "CONFIRMED" ? "rgba(16,185,129,0.5)" : "var(--color-border)"}`,
+                                                     background: "var(--color-bg-elevated)" }}>
+                      <img src={m.photo_url} alt={`${m.full_name} (no photo available)`} loading="lazy"
+                           style={{ width: 38, height: 46, objectFit: "cover", borderRadius: 5, background: "#05070c", flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                          <Link to={`/citizens/${m.citizen_id}`} style={{ fontWeight: 700, fontSize: "0.8rem", color: "var(--color-accent)", textDecoration: "none" }}>
+                            {m.full_name}
+                          </Link>
+                          <span style={{ fontSize: "0.62rem", color: "var(--color-text-subtle)" }}>
+                            ID {m.citizen_id}{m.citizen_status ? ` · ${m.citizen_status}` : ""}
+                          </span>
+                          <span style={{ fontSize: "0.62rem", fontWeight: 700, color: m.status === "CONFIRMED" ? "#10b981" : m.level === "LIKELY" || m.level === "STRONG" ? "#fbbf24" : "#94a3b8" }}>
+                            {m.status === "CONFIRMED" ? "CONFIRMED" : `${m.level} · ${Math.round(m.score * 100)}%`}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: "0.66rem", color: "var(--color-text-muted)" }}>{m.reasons.join("; ")}</div>
+                        {m.criminal_record && m.criminal_record !== "None" && (
+                          <div style={{ fontSize: "0.64rem", color: "#fca5a5" }}>Record: {m.criminal_record}</div>
+                        )}
+                        {m.other_cases.length > 0 && (
+                          <div data-testid="other-cases" style={{ marginTop: 3, fontSize: "0.68rem", fontWeight: 600, color: "#fbbf24", display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+                            <AlertTriangle size={11} /> also in {m.other_cases.map((o) => o.case_number).join(", ")}
+                          </div>
+                        )}
+                        <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
+                          {m.status === "CONFIRMED" ? (
+                            <button disabled={isBusy} onClick={() => run(p.key, () => citizensApi.decide(caseId, p.key, m.citizen_id, "reset", operatorId))}
+                                    style={{ fontSize: "0.66rem", background: "none", border: "none", color: "var(--color-text-muted)", cursor: "pointer" }}>
+                              undo
+                            </button>
+                          ) : (
+                            <>
+                              <button disabled={isBusy} onClick={() => run(p.key, () => citizensApi.decide(caseId, p.key, m.citizen_id, "confirm", operatorId))}
+                                      style={{ fontSize: "0.66rem", fontWeight: 700, padding: "2px 8px", borderRadius: 4, cursor: "pointer",
+                                               border: "1px solid #10b981", background: "transparent", color: "#10b981" }}>
+                                This is them
+                              </button>
+                              <button disabled={isBusy} onClick={() => run(p.key, () => citizensApi.decide(caseId, p.key, m.citizen_id, "reject", operatorId))}
+                                      style={{ fontSize: "0.66rem", fontWeight: 700, padding: "2px 8px", borderRadius: 4, cursor: "pointer",
+                                               border: "1px solid var(--color-border-bright)", background: "transparent", color: "var(--color-text-muted)" }}>
+                                Not them
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
 

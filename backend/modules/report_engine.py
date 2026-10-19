@@ -161,6 +161,8 @@ def build_report_html(d: Dict[str, Any]) -> str:
                     if p.get("suggested_role") else "")
                 by = "-"
             seen = ", ".join(sorted({s["file_name"] for s in p.get("support", [])})) or "-"
+            if p.get("citizen"):
+                seen += " | " + p["citizen"]
             cls = "bad" if role == "GUILTY" else ""
             o.append(f"<tr><td><strong>{_E(str(p['name']))}</strong></td><td class='mono'>{_E(ids)}</td>"
                      f"<td class='{cls}'>{_E(role_txt)}</td><td>{_E(by)}</td><td>{_E(seen)}</td></tr>")

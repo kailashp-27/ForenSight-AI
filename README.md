@@ -240,3 +240,15 @@ person as..."), attach a badge/ID to a person, or add someone by hand.
 API: `GET /api/v1/cases/{id}/people`, `PUT|DELETE /api/v1/cases/{id}/people/{key}`, `POST .../people`,
 `POST .../people/{key}/aliases`.
 
+
+## Citizen register
+
+A reference database of people (fictional test data, `backend/seed/citizens.xlsx`). The `citizens` and
+`citizen_links` tables are created on first start and the register is seeded when empty.
+
+- **Page:** `/citizens` lists everyone with search (name, ID, phone, address, occupation, record) and filters.
+  Click a person for their file: all details, a placeholder photo (upload a real one later for matching) and the cases they are linked to.
+- **Linking:** people in a case's People tab are matched to the register by name, initials and phone number.
+  A match is only a **suggestion** until an investigator clicks "This is them" (audited). Identical names stay ambiguous.
+- **Repeat people:** when one citizen is linked to two or more cases (confirmed, or a likely suggestion), an alert shows in the
+  header bell, the Intelligence Strip, the People tab and the citizen's file.

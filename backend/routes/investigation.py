@@ -234,6 +234,19 @@ async def report(case_id: str, download: bool = Query(False), request: Request =
     chain = await audit_engine.verify_chain()
     from backend.modules.people_roster import build_roster
     people = build_roster(ctx, data["clues"], data["matches"], ctx.get("designations", []))
+    _db = await get_db()
+    try:
+        _cur = await _db.execute(
+            """SELECT l.person_key, l.decided_by, c.id AS cid, c.full_name FROM citizen_links l
+               JOIN citizens c ON c.id = l.citizen_id WHERE l.case_id=%s AND l.status='CONFIRMED'""", (case_id,))
+        confirmed = {r["person_key"]: r for r in await _cur.fetchall()}
+        await _db.commit()
+    finally:
+        await _db.close()
+    for p in people:
+        link = confirmed.get(p["key"])
+        p["citizen"] = (f"Citizen register #{link['cid']} {link['full_name']} (confirmed by {link['decided_by']})"
+                        if link else None)
     html_doc = build_report_html({
         "people": people,
         "case": ctx["case"], "evidence": ctx["evidence"], "matches": data["matches"],
@@ -583,7 +596,12 @@ async def overview(max_cases: int = Query(12, ge=1, le=50)) -> Dict[str, Any]:
         "time": r["timestamp_utc"],
     } for r in rows]
 
-    return {"leads": leads[:30], "gaps": gaps[:40], "activity": activity, "stats": stats}
+    from backend.routes.citizens import all_alerts
+    try:
+        repeat = await all_alerts()
+    except Exception:                       # the register is optional for the rest of the overview
+        repeat = []
+    return {"repeat_people": repeat, "leads": leads[:30], "gaps": gaps[:40], "activity": activity, "stats": stats}
 
 
 # ── key findings (people / ids / items / vehicles) and the event timeline ─────
@@ -692,7 +710,37 @@ async def _roster_for(case_id: str) -> List[Dict[str, Any]]:
 async def case_people(case_id: str) -> Dict[str, Any]:
     """Everyone involved, found from names, chat authors, badges and ID cards in the evidence."""
     roster = await _roster_for(case_id)
+
+    # Match against the citizen register (suggestions only) and flag people who recur across cases.
+    from backend.routes import citizens as citizen_routes
+    citizens = await citizen_routes.load_citizens()
+    links = await citizen_routes.refresh_case_links(case_id, roster, citizens) if citizens else {}
+    counts = await citizen_routes.citizen_case_counts() if citizens else {}
+    by_id = {c["id"]: c for c in citizens}
+    repeat = []
+    for p in roster:
+        matches = []
+        for m in links.get(p["key"], []):
+            if m["status"] == "REJECTED":
+                continue
+            c = by_id.get(m["citizen_id"], {})
+            n = counts.get(m["citizen_id"], 0)
+            others = []
+            if n >= 2:
+                others = [l for l in await citizen_routes._links_for_citizen(m["citizen_id"])
+                          if l["case_id"] != case_id and l["counts_for_alert"]]
+            matches.append({
+                **m, "photo_url": f"/api/v1/citizens/{m['citizen_id']}/photo", "citizen_status": c.get("status"),
+                "criminal_record": c.get("criminal_record"), "case_count": n, "other_cases": others,
+            })
+            if others and m["status"] in ("CONFIRMED", "SUGGESTED"):
+                repeat.append({"person_key": p["key"], "person_name": p["name"], "citizen_id": m["citizen_id"],
+                               "citizen_name": m["full_name"], "status": m["status"],
+                               "other_cases": [{"case_id": o["case_id"], "case_number": o["case_number"],
+                                                "role": o["role"]} for o in others]})
+        p["citizen_matches"] = matches
     return {
+        "repeat_people": repeat,
         "people": roster,
         "roles": list(_PERSON_ROLES),
         "totals": {

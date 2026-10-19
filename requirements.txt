@@ -14,7 +14,8 @@ cryptography>=41.0.7            # aiomysql modern auth + AES-256-GCM audit paylo
 # ─── Forensic ROI inspection (CCTV workbench) ────────────────────────────────
 opencv-python-headless>=4.9   # frame extraction, CLAHE, unsharp mask, letterbox
 numpy>=1.26
-httpx>=0.27                   # async client for the local Ollama VLM
+httpx>=0.27
+openpyxl>=3.1               # reads the citizen register spreadsheet                   # async client for the local Ollama VLM
 
 # ─── Automatic evidence analysis (objects, OCR, documents, correlation) ──────
 ultralytics>=8.3             # YOLOv8 object detection (pre-trained COCO weights)

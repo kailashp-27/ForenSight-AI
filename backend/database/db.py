@@ -205,6 +205,46 @@ DESIGNATIONS_TABLE_SQL = """
 """
 
 
+# Reference register of people (citizens) and the investigator-controlled links to case people.
+CITIZENS_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS citizens (
+        id              INT PRIMARY KEY,
+        full_name       VARCHAR(190) NOT NULL,
+        norm_name       VARCHAR(190) NULL,
+        dob             DATE NULL,
+        phone           VARCHAR(40) NULL,
+        phone_digits    VARCHAR(20) NULL,
+        address         VARCHAR(500) NULL,
+        occupation      VARCHAR(190) NULL,
+        criminal_record VARCHAR(500) NULL,
+        status          VARCHAR(60) NULL,
+        photo_path      VARCHAR(255) NULL,
+        created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_citizens_name (norm_name)
+    );
+"""
+
+CITIZEN_LINKS_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS citizen_links (
+        id           VARCHAR(64)  PRIMARY KEY,
+        case_id      VARCHAR(255) NOT NULL,
+        person_key   VARCHAR(190) NOT NULL,
+        person_name  VARCHAR(190) NULL,
+        person_role  VARCHAR(30)  NULL,
+        citizen_id   INT          NOT NULL,
+        status       VARCHAR(20)  NOT NULL DEFAULT 'SUGGESTED',
+        score        FLOAT        NOT NULL DEFAULT 0,
+        level        VARCHAR(12)  NULL,
+        reasons      TEXT         NULL,
+        decided_by   VARCHAR(100) NULL,
+        decided_at   VARCHAR(40)  NULL,
+        created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_link (case_id, person_key, citizen_id),
+        INDEX idx_link_citizen (citizen_id)
+    );
+"""
+
+
 async def init_db() -> None:
     """Create DB tables on startup using aiomysql."""
     global _pool
@@ -220,11 +260,15 @@ async def init_db() -> None:
             await _ensure_columns(cur)
             await cur.execute(CLUES_TABLE_SQL)
             await cur.execute(DESIGNATIONS_TABLE_SQL)
+            await cur.execute(CITIZENS_TABLE_SQL)
+            await cur.execute(CITIZEN_LINKS_TABLE_SQL)
             # Hash-chained, append-only chain-of-custody log.
             from backend.modules import audit_engine
             await audit_engine.ensure_schema(cur)
         await conn.commit()
     print(f"[DB] MySQL initialised for db: {config['db']}")
+    from backend.modules import citizen_import
+    await citizen_import.seed_if_empty()
 
 
 class _DBContextManager:
