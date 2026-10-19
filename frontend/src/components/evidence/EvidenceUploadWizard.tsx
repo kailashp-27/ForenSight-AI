@@ -15,7 +15,7 @@ interface Props {
   onClose: () => void;
 }
 
-type EvidenceCategory = "ALL" | "AUDIO" | "VIDEO" | "DOCUMENT" | "IMAGE";
+type EvidenceCategory = "ALL" | "AUDIO" | "VIDEO" | "DOCUMENT" | "IMAGE" | "TEXT";
 
 interface CategoryMeta {
   id: EvidenceCategory;
@@ -70,6 +70,16 @@ const CATEGORIES: CategoryMeta[] = [
     badge: "Visual Forensics",
   },
   {
+    id: "TEXT",
+    label: "Chat / Message Export",
+    desc: "Slack or WhatsApp exports, SMS dumps, logs (.json, .txt, .csv)",
+    icon: FileText,
+    color: "#06b6d4",
+    formats: [".json", ".txt", ".csv", ".log", ".md"],
+    mimes: ["text/plain", "text/csv", "text/markdown", "application/json"],
+    badge: "Messages, names, times & places",
+  },
+  {
     id: "ALL",
     label: "Auto-Detect",
     desc: "Accept any forensic evidence format",
@@ -80,6 +90,7 @@ const CATEGORIES: CategoryMeta[] = [
       "audio/mpeg", "audio/wav", "audio/ogg",
       "video/mp4", "video/x-msvideo", "video/quicktime",
       "application/pdf",
+      "text/plain", "text/csv", "text/markdown", "application/json",
       "image/jpeg", "image/png", "image/webp"
     ],
     badge: "Automatic Routing",
@@ -91,6 +102,8 @@ const ALL_ALLOWED: Record<string, string> = {
   "video/mp4": "Video", "video/x-msvideo": "Video", "video/quicktime": "Video",
   "audio/mpeg": "Audio", "audio/wav": "Audio", "audio/ogg": "Audio",
   "application/pdf": "Document",
+  "text/plain": "Chat / text", "text/csv": "Chat / text", "text/markdown": "Chat / text",
+  "application/json": "Chat / text",
 };
 
 function FileIcon({ mime }: { mime: string }) {

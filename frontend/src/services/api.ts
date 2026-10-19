@@ -71,7 +71,7 @@ export interface Evidence {
   id: string;
   case_id: string;
   file_name: string;
-  file_type: "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "OTHER";
+  file_type: "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "TEXT" | "OTHER";
   file_path: string;
   file_size: number;
   mime_type: string;

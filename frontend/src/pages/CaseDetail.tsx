@@ -1,9 +1,9 @@
 // frontend/src/pages/CaseDetail.tsx
 import React, { useEffect, useState } from "react";
-import { useParams, Link, useLocation } from "react-router-dom";
+import { useParams, Link, useLocation, useSearchParams } from "react-router-dom";
 import {
   ChevronRight, Upload, FileVideo, FileImage, FileAudio,
-  FileText, File, MoreHorizontal, ArrowLeft, AlertTriangle,
+  FileText, File, MoreHorizontal, ArrowLeft, AlertTriangle, Network,
 } from "lucide-react";
 import { Badge, statusToVariant } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -34,7 +34,9 @@ export function CaseDetail() {
   const { id } = useParams<{ id: string }>();
   const { selectedCase, loading, fetchCase } = useCaseStore();
   const [showUpload, setShowUpload] = useState(false);
-  const [viewingEvidenceId, setViewingEvidenceId] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  // ?view=<evidenceId> deep-links straight into the evidence viewer (used by clue matches).
+  const [viewingEvidenceId, setViewingEvidenceId] = useState<string | null>(searchParams.get("view"));
   const [filterType, setFilterType] = useState<string>("ALL");
   const location = useLocation();
 
@@ -189,12 +191,19 @@ export function CaseDetail() {
             </div>
           </div>
 
-          <Button
-            icon={<Upload style={{ width: 14, height: 14 }} />}
-            onClick={() => setShowUpload(true)}
-          >
-            Upload Evidence
-          </Button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Link to={`/cases/${selectedCase.id}/investigation`} style={{ textDecoration: "none" }}>
+              <Button variant="secondary" icon={<Network style={{ width: 14, height: 14 }} />}>
+                Investigation board
+              </Button>
+            </Link>
+            <Button
+              icon={<Upload style={{ width: 14, height: 14 }} />}
+              onClick={() => setShowUpload(true)}
+            >
+              Upload Evidence
+            </Button>
+          </div>
         </div>
       </div>
 

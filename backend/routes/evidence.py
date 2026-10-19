@@ -22,6 +22,8 @@ from fastapi.responses import JSONResponse, FileResponse
 from backend.config import settings
 from backend.database.db import get_db, write_audit_log
 from backend.modules.whisper_processor import run_whisper_extraction
+from backend.modules.vision.cv_engine import sha256_file
+from fastapi.concurrency import run_in_threadpool
 
 router = APIRouter()
 
@@ -41,7 +43,14 @@ ALLOWED_TYPES: dict[str, str] = {
     "audio/ogg": "AUDIO",
     # Documents
     "application/pdf": "DOCUMENT",
+    # Chat / message exports and plain text (Slack JSON, WhatsApp .txt, logs)
+    "text/plain": "TEXT",
+    "text/csv": "TEXT",
+    "text/markdown": "TEXT",
+    "application/json": "TEXT",
 }
+# Browsers often send a generic MIME for these; fall back to the file extension.
+_TEXT_EXTENSIONS = {".txt", ".json", ".csv", ".log", ".md"}
 
 
 # ── Background task stub ─────────────────────────────────────────────────────
@@ -68,8 +77,6 @@ async def _process_evidence(evidence_id: str, file_path: str, file_type: str, si
             "message": "Processing started...",
         })
 
-        # TODO Phase 1: await run_yolov8_detection(evidence_id, file_path)
-        
         # Phase 2: Whisper Transcription for Audio/Video
         if file_type in ("AUDIO", "VIDEO"):
             await sio.emit("evidence:status_update", {
@@ -83,6 +90,19 @@ async def _process_evidence(evidence_id: str, file_path: str, file_type: str, si
             except Exception as e:
                 # Log but do not fail the whole process if transcription fails
                 print(f"Whisper transcription failed: {e}")
+
+        # Automatic clue extraction (YOLO + OCR + EXIF + transcript/PDF text).
+        # Runs after Whisper so transcript clues are included. A failure here
+        # is recorded on the evidence row and must not fail ingestion.
+        await sio.emit("evidence:status_update", {
+            "evidence_id": evidence_id, "status": "PROCESSING", "progress": 60,
+            "message": "Extracting clues (objects, text, metadata)...",
+        })
+        try:
+            from backend.modules import investigation_service
+            await investigation_service.analyze_evidence(evidence_id)
+        except Exception as e:
+            print(f"Automatic analysis failed: {e}")
 
         # Finalize processing
         await db.execute(
@@ -131,6 +151,8 @@ async def upload_evidence(
     # Validate MIME type
     mime = file.content_type or ""
     file_type = ALLOWED_TYPES.get(mime)
+    if not file_type and Path(file.filename or "").suffix.lower() in _TEXT_EXTENSIONS:
+        file_type, mime = "TEXT", "text/plain"
     if not file_type:
         raise HTTPException(
             status_code=415,
@@ -158,13 +180,17 @@ async def upload_evidence(
 
     file_size = dest_path.stat().st_size
 
+    # Chain of custody: SHA-256 of the stored bytes, recorded at ingestion.
+    file_hash = await run_in_threadpool(sha256_file, dest_path)
+
     # Insert DB record
     db = await get_db()
     try:
         await db.execute(
             """INSERT INTO evidence
-               (id, case_id, file_name, file_type, file_path, file_size, mime_type, status)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, 'PENDING')""",
+               (id, case_id, file_name, file_type, file_path, file_size, mime_type,
+                status, file_hash_sha256)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, 'PENDING', %s)""",
             (
                 evidence_id,
                 case_id,
@@ -173,6 +199,7 @@ async def upload_evidence(
                 str(dest_path),
                 file_size,
                 mime,
+                file_hash,
             ),
         )
         await db.commit()
@@ -184,8 +211,11 @@ async def upload_evidence(
     await write_audit_log(
         action="UPLOAD_EVIDENCE",
         case_id=case_id,
-        metadata={"evidence_id": evidence_id, "file_name": file.filename, "file_type": file_type},
+        metadata={"evidence_id": evidence_id, "file_name": file.filename, "file_type": file_type,
+                  "file_size": file_size},
         ip_address=request.client.host if request.client else None,
+        evidence_id=evidence_id,
+        file_hash_sha256=file_hash,
     )
 
     # Import sio lazily to avoid circular import

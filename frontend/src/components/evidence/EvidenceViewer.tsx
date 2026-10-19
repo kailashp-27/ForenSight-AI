@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   X, Play, Pause, FileText, Download, Copy, Check, Search,
-  Bot, Sparkles, RefreshCw, AlertTriangle, ShieldAlert, Cpu, ExternalLink
+  Bot, Sparkles, RefreshCw, AlertTriangle, ShieldAlert, Cpu, ExternalLink, ScanSearch, Link2
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import ReactMarkdown from "react-markdown";
+import { investigationApi, type EvidenceClue } from "../../services/forensicApi";
 
 interface TextChunk {
   id: string;
@@ -13,6 +15,7 @@ interface TextChunk {
   source_type: string;
   start_time: number | null;
   end_time: number | null;
+  page_number?: number | null;
 }
 
 interface EvidenceDetail {
@@ -45,7 +48,7 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<"transcript" | "analysis">("transcript");
+  const [activeTab, setActiveTab] = useState<"transcript" | "analysis" | "clues">("transcript");
   const [copied, setCopied] = useState(false);
 
   // Ollama Analysis states
@@ -54,6 +57,9 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
   const [selectedModel, setSelectedModel] = useState("llama3.2:1b");
   const [availableModels, setAvailableModels] = useState<string[]>(["llama3.2:1b"]);
 
+  const navigate = useNavigate();
+  const [clues, setClues] = useState<EvidenceClue[]>([]);
+  const [hoverClueId, setHoverClueId] = useState<string | null>(null);
   const mediaRef = useRef<HTMLMediaElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -105,6 +111,9 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
 
     fetchEvidence();
     fetchModels();
+    investigationApi.evidenceClues(evidenceId)
+      .then((r) => { if (mounted) setClues(r.clues); })
+      .catch(() => { /* clues are optional until analysis has run */ });
 
     const socket = (window as any).__socket || null; // Fallback if socket is attached globally, otherwise we can import it.
     // Let's actually import getSocket if it's available. We'll import it at the top.
@@ -141,6 +150,33 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
     } catch (err) {
       console.error(err);
       setEvidence(e => e ? { ...e, transcription_status: "FAILED" } : null);
+    }
+  };
+
+  // Documents/images: run text extraction (PDF text layer, or OCR for scanned pages) on demand.
+  const [extracting, setExtracting] = useState(false);
+  const handleExtractText = async () => {
+    setExtracting(true);
+    try {
+      await investigationApi.analyzeEvidence(evidenceId);
+      const started = Date.now();
+      const poll = async () => {
+        const r = await fetch(`/api/evidence/${evidenceId}`);
+        if (r.ok) {
+          const data = await r.json();
+          if ((data.textChunks && data.textChunks.length > 0) || Date.now() - started > 90_000) {
+            setEvidence(data);
+            setExtracting(false);
+            investigationApi.evidenceClues(evidenceId).then((c) => setClues(c.clues)).catch(() => undefined);
+            return;
+          }
+        }
+        window.setTimeout(poll, 2500);
+      };
+      window.setTimeout(poll, 2500);
+    } catch (err) {
+      console.error(err);
+      setExtracting(false);
     }
   };
 
@@ -273,6 +309,16 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {evidence.file_type === "VIDEO" && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => navigate(`/workbench/${evidenceId}`)}
+                icon={<ScanSearch style={{ width: 14, height: 14 }} />}
+              >
+                Open in Forensic Workbench
+              </Button>
+            )}
             <Button
               size="sm"
               variant="primary"
@@ -370,11 +416,37 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
               </div>
             ) : evidence.file_type === "IMAGE" ? (
               <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <img 
-                  src={mediaUrl} 
-                  alt={evidence.file_name} 
-                  style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 8, boxShadow: "0 10px 30px rgba(0,0,0,0.5)", objectFit: "contain" }}
-                />
+                <div style={{ position: "relative", display: "inline-block", lineHeight: 0, maxWidth: "100%", maxHeight: "100%" }}>
+                  <img
+                    src={mediaUrl}
+                    alt={evidence.file_name}
+                    style={{ maxWidth: "100%", maxHeight: "70vh", borderRadius: 8, boxShadow: "0 10px 30px rgba(0,0,0,0.5)", objectFit: "contain", display: "block" }}
+                  />
+                  {/* Clue highlights: amber = also found in other evidence, cyan = this file only (on hover) */}
+                  {clues.map((c) => {
+                    let b: number[] | null = null;
+                    // The API returns the box already parsed; tolerate a JSON string too.
+                    try { b = Array.isArray(c.bbox) ? c.bbox : c.bbox ? JSON.parse(c.bbox) : null; } catch { b = null; }
+                    if (!b || b.length !== 4) return null;
+                    const matched = c.matches.length > 0;
+                    if (!matched && hoverClueId !== c.id) return null;
+                    return (
+                      <div
+                        key={c.id}
+                        title={`${c.kind}: ${c.value}${matched ? " - also in other evidence" : ""}`}
+                        style={{
+                          position: "absolute",
+                          left: `${b[0] * 100}%`, top: `${b[1] * 100}%`,
+                          width: `${(b[2] - b[0]) * 100}%`, height: `${(b[3] - b[1]) * 100}%`,
+                          border: `2px solid ${matched ? "#f59e0b" : "#22d3ee"}`,
+                          background: hoverClueId === c.id ? "rgba(245,158,11,0.25)" : "transparent",
+                          boxShadow: matched ? "0 0 0 1px rgba(0,0,0,0.6)" : undefined,
+                          pointerEvents: "none",
+                        }}
+                      />
+                    );
+                  })}
+                </div>
               </div>
             ) : evidence.file_type === "DOCUMENT" && evidence.file_name.toLowerCase().endsWith('.pdf') ? (
               <div style={{ width: "100%", height: "100%", background: "#fff", borderRadius: 8, overflow: "hidden" }}>
@@ -450,6 +522,26 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
                   {analysisResult && (
                     <span style={{ fontSize: "0.65rem", background: "rgba(16,185,129,0.15)", color: "#10b981", padding: "1px 5px", borderRadius: 10, fontWeight: 700 }}>
                       DONE
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => setActiveTab("clues")}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "6px 12px", borderRadius: 6, border: "none",
+                    background: activeTab === "clues" ? "var(--color-bg-base)" : "transparent",
+                    color: activeTab === "clues" ? "var(--color-text-primary)" : "var(--color-text-muted)",
+                    fontSize: "0.75rem", fontWeight: activeTab === "clues" ? 700 : 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  <Link2 size={14} style={{ color: "#f59e0b" }} />
+                  <span>Clues</span>
+                  {clues.length > 0 && (
+                    <span style={{ fontSize: "0.65rem", background: "rgba(245,158,11,0.15)", color: "#f59e0b", padding: "1px 5px", borderRadius: 10, fontWeight: 700 }}>
+                      {clues.filter((c) => c.matches.length > 0).length}/{clues.length}
                     </span>
                   )}
                 </button>
@@ -557,7 +649,10 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
                                 </span>
                               )}
                               <span style={{ fontSize: "0.68rem", color: "#a855f7", fontFamily: "monospace", fontWeight: 600 }}>
-                                {chunk.start_time !== null ? formatTime(chunk.start_time) : "0:00"}
+                                {chunk.page_number
+                                  ? `Page ${chunk.page_number}`
+                                  : chunk.start_time !== null ? formatTime(chunk.start_time) : "0:00"}
+                                {chunk.source_type === "PDF_OCR" ? " · OCR (scanned page)" : ""}
                               </span>
                             </div>
                             {isChunkActive && (
@@ -584,6 +679,19 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
                              ? "Click below to run the Whisper AI speech-to-text pipeline." 
                              : "No OCR text extraction has been generated for this file."}
                       </p>
+                      {(evidence.file_type === "DOCUMENT" || evidence.file_type === "IMAGE") && (
+                        <div style={{ marginTop: 16 }}>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            loading={extracting}
+                            icon={<FileText size={14} />}
+                            onClick={handleExtractText}
+                          >
+                            {extracting ? "Extracting text…" : "Extract text now (OCR for scanned pages)"}
+                          </Button>
+                        </div>
+                      )}
                       {/* Show spinner while transcribing */}
                       {evidence.transcription_status === "TRANSCRIBING" && (
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16, color: "var(--color-accent)", fontSize: "0.78rem", justifyContent: "center" }}>
@@ -624,6 +732,54 @@ export function EvidenceViewer({ evidenceId, onClose }: EvidenceViewerProps) {
                     Analyze Transcript with Local Ollama ({selectedModel})
                   </Button>
                 </div>
+              </div>
+            )}
+
+            {/* TAB 3: Clues (matched across the case) */}
+            {activeTab === "clues" && (
+              <div style={{ flex: 1, overflowY: "auto", padding: "1rem", display: "flex", flexDirection: "column", gap: "0.625rem" }}>
+                {clues.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "3rem 1rem", color: "var(--color-text-subtle)" }}>
+                    <p style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--color-text-muted)" }}>No clues extracted yet</p>
+                    <p style={{ fontSize: "0.75rem", marginTop: 4 }}>Run automatic analysis from the case investigation board.</p>
+                  </div>
+                ) : clues.map((c) => {
+                  const matched = c.matches.length > 0;
+                  return (
+                    <div
+                      key={c.id}
+                      onMouseEnter={() => setHoverClueId(c.id)}
+                      onMouseLeave={() => setHoverClueId(null)}
+                      style={{
+                        padding: "0.65rem 0.75rem", borderRadius: 8,
+                        background: matched ? "rgba(245,158,11,0.08)" : "var(--color-bg-elevated)",
+                        border: `1px solid ${matched ? "rgba(245,158,11,0.45)" : "var(--color-border)"}`,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: "0.62rem", fontWeight: 700, color: "var(--color-text-muted)", border: "1px solid var(--color-border)", borderRadius: 4, padding: "0 5px" }}>{c.kind}</span>
+                        <strong style={{ fontFamily: c.kind === "OBJECT" ? "inherit" : "monospace", fontSize: "0.85rem", color: "var(--color-text-primary)" }}>{c.value}</strong>
+                        <span style={{ marginLeft: "auto", fontSize: "0.65rem", color: "var(--color-text-subtle)", fontFamily: "monospace" }}>
+                          {Math.round(c.confidence * 100)}% · {c.source}
+                        </span>
+                      </div>
+                      {matched ? c.matches.map((m) => (
+                        <div key={m.match_id} style={{ marginTop: 6, fontSize: "0.72rem", color: "#fbbf24" }}>
+                          <strong>{m.strength}</strong> match - also in:{" "}
+                          {m.also_in.map((a, i) => (
+                            <span key={a.clue_id}>
+                              {i > 0 && ", "}
+                              <span style={{ color: "var(--color-text-primary)" }}>{a.file_name}</span>
+                              {a.timestamp_str ? <span style={{ fontFamily: "monospace" }}> @ {a.timestamp_str}</span> : null}
+                            </span>
+                          ))}
+                        </div>
+                      )) : (
+                        <div style={{ marginTop: 4, fontSize: "0.68rem", color: "var(--color-text-subtle)" }}>Not found in other evidence</div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 
