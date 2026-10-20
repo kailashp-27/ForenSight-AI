@@ -6,7 +6,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft, Clock, Users, Download, Fingerprint, FileText, GraduationCap, Link2, ListChecks, Loader2, MapPin, MessageSquareText, Network, Play,
-  Printer, Sparkles,
+  Lock, Printer, Sparkles, Unlock,
 } from "lucide-react";
 import { casesApi, type Case } from "../services/api";
 import {
@@ -97,6 +97,26 @@ export function Investigation() {
 
   // Poll while analysis runs; refresh the views once it finishes.
   const running = status?.running ?? false;
+  const closed = theCase?.status === "CLOSED";
+  const [closing, setClosing] = useState(false);
+
+  // Close or reopen the case. Closing is reversible and recorded in the audit log by the API.
+  const toggleClosed = async () => {
+    if (!theCase || !caseId) return;
+    const msg = closed
+      ? "Reopen this case? Analysis and edits will be available again."
+      : "Close this case? The evidence and findings stay readable, and you can reopen it later.";
+    if (!window.confirm(msg)) return;
+    setClosing(true);
+    try {
+      setTheCase(await casesApi.update(caseId, { status: closed ? "OPEN" : "CLOSED" }));
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setClosing(false);
+    }
+  };
   useEffect(() => {
     if (!running) {
       if (wasRunning.current) {
@@ -202,7 +222,8 @@ export function Investigation() {
           </div>
           <button
             onClick={runAnalysis}
-            disabled={starting || running}
+            disabled={starting || running || closed}
+            title={closed ? "Reopen the case to run analysis" : undefined}
             style={{
               display: "inline-flex", alignItems: "center", gap: 8, height: 40, padding: "0 16px", borderRadius: 8,
               border: "1px solid var(--color-accent)", background: "var(--color-accent)", color: "#fff",
@@ -211,6 +232,19 @@ export function Investigation() {
           >
             {starting || running ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
             {running ? "Analysing evidence…" : "Run automatic analysis"}
+          </button>
+          <button
+            onClick={() => void toggleClosed()}
+            disabled={!theCase || closing || running}
+            data-testid="toggle-case-closed"
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6, height: 40, padding: "0 14px", borderRadius: 8, cursor: "pointer",
+              border: `1px solid ${closed ? "#10b981" : "var(--color-border-bright)"}`, background: "transparent",
+              color: closed ? "#10b981" : "var(--color-text-body)", fontWeight: 700, fontSize: "0.82rem",
+            }}
+          >
+            {closing ? <Loader2 size={14} className="animate-spin" /> : closed ? <Unlock size={14} /> : <Lock size={14} />}
+            {closed ? "Reopen case" : "Close case"}
           </button>
         </div>
 
@@ -223,6 +257,14 @@ export function Investigation() {
           {kpi("Weak similarities", totals?.weak, "#94a3b8")}
         </div>
       </div>
+
+      {closed && (
+        <div data-testid="closed-banner" style={{ margin: "0.75rem 1.25rem 0", padding: "0.5rem 0.75rem", borderRadius: 6, fontSize: "0.78rem",
+                                                  background: "rgba(100,116,139,0.15)", border: "1px solid rgba(100,116,139,0.5)",
+                                                  color: "var(--color-text-body)", display: "flex", gap: 6, alignItems: "center" }}>
+          <Lock size={13} /> This case is closed. Everything stays readable. Reopen it to run analysis again.
+        </div>
+      )}
 
       {error && (
         <div role="alert" style={{ margin: "0.75rem 1.25rem 0", padding: "0.5rem 0.75rem", borderRadius: 6, fontSize: "0.78rem",
