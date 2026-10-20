@@ -712,3 +712,32 @@ export const citizensApi = {
     return res.json();
   },
 };
+
+// ── closed-case summary ──────────────────────────────────────────────────────
+export interface ClosureSummaryData {
+  case: { id: string; case_number: string; title: string; description: string | null; status: string; created_at: string | null; updated_at: string | null };
+  guilty: {
+    key: string; name: string; aliases: string[]; basis: string | null; designated_by: string | null; designated_at: string | null;
+    identifiers: { value: string; norm: string; how: string; file_name: string; at: string | null }[];
+    photos: { url: string; caption: string }[];
+    support: { clue_id: string; file_name: string; at: string | null; text: string; verified: boolean }[];
+    what_the_evidence_shows: { file_name: string; kind: string | null; time: string | null; assumed_date: boolean; text: string }[];
+    citizen: {
+      citizen_id: number; full_name: string; dob: string | null; phone: string | null; address: string | null; occupation: string | null;
+      criminal_record: string | null; citizen_status: string | null; link_status: string; photo_url: string;
+    } | null;
+  }[];
+  others: Record<"victims" | "suspects" | "witnesses" | "cleared", { key: string; name: string; role: string }[]>;
+  how: {
+    items: { name: string; item_class: string | null; verified: boolean; files: number }[];
+    vehicles: { description: string; plates: unknown[]; verified: boolean; files: number }[];
+    identifiers: { value: string; verified: boolean; files: number; label: string | null }[];
+  };
+  sequence: { file_name: string; kind: string | null; time: string | null; assumed_date: boolean; text: string }[];
+  notes: string[];
+  notice: string;
+}
+
+export const closureApi = {
+  get: (caseId: string) => request<ClosureSummaryData>(`/cases/${caseId}/closure-summary`),
+};

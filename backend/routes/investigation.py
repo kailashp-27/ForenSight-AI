@@ -619,6 +619,44 @@ async def key_findings(case_id: str) -> Dict[str, Any]:
     return summary
 
 
+@router.get("/cases/{case_id}/closure-summary")
+async def closure_summary(case_id: str) -> Dict[str, Any]:
+    """Who did it, what and how, plus the investigator's guilty determination. Meant for closed cases."""
+    from backend.modules.closure_summary import build_closure_summary
+    data = await _require_case(case_id)
+    findings = build_key_findings(data["ctx"], data["clues"], data["matches"])
+    timeline = build_event_timeline(data["ctx"], svc.chunk_terms)
+
+    # confirmed (or best suggested) citizen-register link per person
+    links: Dict[str, Any] = {}
+    db = await get_db()
+    try:
+        cur = await db.execute(
+            """SELECT l.person_key, l.status, l.score, l.level, c.id, c.full_name, c.dob, c.phone, c.address,
+                      c.occupation, c.criminal_record, c.status AS citizen_status
+               FROM citizen_links l JOIN citizens c ON c.id = l.citizen_id
+               WHERE l.case_id=%s AND l.status <> 'REJECTED' ORDER BY l.score DESC""", (case_id,))
+        rows = [dict(r) for r in await cur.fetchall()]
+        cur = await db.execute("SELECT * FROM cases WHERE id=%s", (case_id,))
+        case = dict(await cur.fetchone())
+        await db.commit()
+    finally:
+        await db.close()
+    for r in rows:
+        cur_best = links.get(r["person_key"])
+        if cur_best and (cur_best["status"] == "CONFIRMED" or r["status"] != "CONFIRMED"):
+            continue
+        links[r["person_key"]] = {
+            "citizen_id": r["id"], "full_name": r["full_name"], "dob": str(r["dob"]) if r["dob"] else None,
+            "phone": r["phone"], "address": r["address"], "occupation": r["occupation"],
+            "criminal_record": r["criminal_record"], "citizen_status": r["citizen_status"],
+            "link_status": r["status"], "score": float(r["score"] or 0), "level": r["level"],
+            "photo_url": f"/api/v1/citizens/{r['id']}/photo"}
+    for k in ("created_at", "updated_at"):
+        case[k] = str(case.get(k)) if case.get(k) else None
+    return build_closure_summary(case, findings, timeline, links)
+
+
 @router.get("/cases/{case_id}/event-timeline")
 async def event_timeline(case_id: str, window_min: int = Query(45, ge=5, le=240)) -> Dict[str, Any]:
     """Chat, speech and video aligned on one wall-clock, plus the aligned groups."""

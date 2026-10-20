@@ -8,6 +8,7 @@ import {
 import { Badge, statusToVariant } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { EvidenceUploadWizard } from "../components/evidence/EvidenceUploadWizard";
+import { ClosureSummary } from "../components/investigation/ClosureSummary";
 import { EvidenceViewer } from "../components/evidence/EvidenceViewer";
 import { useCaseStore } from "../store/caseStore";
 import type { Evidence } from "../services/api";
@@ -206,6 +207,8 @@ export function CaseDetail() {
           </div>
         </div>
       </div>
+
+      {selectedCase.status === "CLOSED" && <ClosureSummary caseId={selectedCase.id} />}
 
       {/* Evidence section */}
       <div className="card" style={{ overflow: "hidden", flex: 1 }}>
