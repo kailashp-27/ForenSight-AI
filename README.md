@@ -4,6 +4,20 @@ A prototype workspace for organising investigation cases and reviewing uploaded 
 
 The interface is built with React and TypeScript. FastAPI provides the API, Socket.IO reports processing progress, and an async MySQL connection stores case and evidence records.
 
+## Project screenshots
+
+### Investigation dashboard
+
+![ForenSight AI investigation dashboard showing case totals, evidence counts, a case timeline, and recent cases](docs/images/investigation-dashboard.jpg)
+
+The dashboard brings case statistics, evidence counts, the selected case timeline, and recent investigations into one view.
+
+### CCTV forensic workbench
+
+![ForenSight AI CCTV workbench showing a selected visitor badge, draft and verified findings, and an evidence timeline](docs/images/cctv-forensic-workbench.jpg)
+
+The workbench lets investigators inspect a selected video region, review extracted badge details, and verify findings alongside the evidence timeline.
+
 ## Current implementation
 
 - Create and browse cases and their associated evidence.
